@@ -1,0 +1,561 @@
+{
+  "info": {
+    "name": "Business Management API",
+    "description": "Complete API collection for testing",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "health"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data && jsonData.data.token) {",
+                  "    pm.environment.set(\"token\", jsonData.data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Doe\",\n  \"email\": \"john@business.com\",\n  \"password\": \"password123\",\n  \"phone\": \"+1-555-0100\",\n  \"companyName\": \"Doe Tiles & Construction\",\n  \"companyAddress\": \"123 Business St, New York, NY 10001\",\n  \"companyPhone\": \"+1-555-0101\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "register"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.data && jsonData.data.token) {",
+                  "    pm.environment.set(\"token\", jsonData.data.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john@business.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current User Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Suppliers",
+      "item": [
+        {
+          "name": "Create Supplier",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"ABC Building Supplies\",\n  \"phone\": \"+1-555-0200\",\n  \"email\": \"contact@abcsupplies.com\",\n  \"address\": \"456 Supplier Ave, Brooklyn, NY 11201\",\n  \"category\": \"Building Materials\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/suppliers",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "suppliers"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Suppliers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/suppliers?page=1&limit=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "suppliers"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Purchase Orders",
+      "item": [
+        {
+          "name": "Create Purchase Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quotationId\": \"QUO-001\",\n  \"customerName\": \"Smith Construction Ltd\",\n  \"supplier\": \"657a2b3c4d5e6f7g8h9i0j1k\",\n  \"orderDate\": \"2025-12-06\",\n  \"expectedDelivery\": \"2025-12-15\",\n  \"status\": \"Draft\",\n  \"items\": [\n    {\n      \"name\": \"Ceramic Floor Tiles\",\n      \"quantity\": 500,\n      \"unit\": \"sqft\",\n      \"unitPrice\": 5.50\n    },\n    {\n      \"name\": \"Tile Adhesive\",\n      \"quantity\": 20,\n      \"unit\": \"bags\",\n      \"unitPrice\": 15.00\n    }\n  ],\n  \"notes\": \"Urgent order - needed for Smith project\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/purchase-orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchase-orders"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Purchase Order Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"Ordered\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/purchase-orders/PO_ID/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "purchase-orders",
+                "PO_ID",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Quotations",
+      "item": [
+        {
+          "name": "Create Quotation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"quotation\",\n  \"customerName\": \"Johnson Remodeling\",\n  \"customerPhone\": \"+1-555-0300\",\n  \"customerAddress\": \"789 Customer Rd, Queens, NY 11354\",\n  \"projectTitle\": \"Bathroom Renovation - Apartment 5B\",\n  \"invoiceDate\": \"2025-12-06\",\n  \"dueDate\": \"2025-12-20\",\n  \"lineItems\": [\n    {\n      \"item\": {\n        \"category\": \"Floor Tile\",\n        \"name\": \"Porcelain Marble-Look Tile\",\n        \"costPrice\": 4.00,\n        \"sellingPrice\": 6.50\n      },\n      \"quantity\": 150,\n      \"customDescription\": \"\",\n      \"isOriginalQuotationItem\": true\n    },\n    {\n      \"item\": {\n        \"category\": \"Wall Tile\",\n        \"name\": \"Subway Tiles - White\",\n        \"costPrice\": 2.50,\n        \"sellingPrice\": 4.00\n      },\n      \"quantity\": 200,\n      \"isOriginalQuotationItem\": true\n    }\n  ],\n  \"paymentHistory\": []\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/quotations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "quotations"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Add Payment to Quotation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 500,\n  \"date\": \"2025-12-06\",\n  \"description\": \"Initial deposit - 30%\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/quotations/QUOTATION_ID/payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "quotations",
+                "QUOTATION_ID",
+                "payments"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Convert Quotation to Invoice",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/quotations/QUOTATION_ID/convert-to-invoice",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "quotations",
+                "QUOTATION_ID",
+                "convert-to-invoice"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Material Sales",
+      "item": [
+        {
+          "name": "Create Material Sale",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Wilson Home Improvement\",\n  \"customerPhone\": \"+1-555-0400\",\n  \"customerAddress\": \"321 Homeowner St, Manhattan, NY 10002\",\n  \"saleDate\": \"2025-12-06\",\n  \"items\": [\n    {\n      \"category\": \"Floor Tile\",\n      \"colorCode\": \"BG-2401\",\n      \"productName\": \"Beige Marble Effect\",\n      \"plank\": 25,\n      \"sqftPerPlank\": 22,\n      \"totalSqft\": 550,\n      \"unitPrice\": 7.00,\n      \"amount\": 3850,\n      \"costPerSqft\": 4.50,\n      \"totalCost\": 2475\n    },\n    {\n      \"category\": \"Wall Tile\",\n      \"colorCode\": \"WH-1205\",\n      \"productName\": \"White Glossy Subway\",\n      \"plank\": 15,\n      \"sqftPerPlank\": 18,\n      \"totalSqft\": 270,\n      \"unitPrice\": 5.00,\n      \"amount\": 1350,\n      \"costPerSqft\": 3.00,\n      \"totalCost\": 810\n    }\n  ],\n  \"paymentHistory\": [\n    {\n      \"amount\": 2000,\n      \"date\": \"2025-12-06\",\n      \"description\": \"Cash payment - 50% upfront\"\n    }\n  ],\n  \"status\": \"partial\",\n  \"notes\": \"Customer will pick up on Friday\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/material-sales",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "material-sales"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Job Costs",
+      "item": [
+        {
+          "name": "Create Job Cost Document",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customerName\": \"Martinez Family\",\n  \"customerPhone\": \"+1-555-0500\",\n  \"projectTitle\": \"Complete Kitchen Remodel\",\n  \"invoiceDate\": \"2025-12-06\",\n  \"invoiceItems\": [\n    {\n      \"category\": \"Floor Tile\",\n      \"name\": \"Premium Hardwood-Look Tile\",\n      \"quantity\": 400,\n      \"costPrice\": 5.00,\n      \"sellingPrice\": 8.50\n    },\n    {\n      \"category\": \"Backsplash\",\n      \"name\": \"Glass Mosaic Tiles\",\n      \"quantity\": 50,\n      \"costPrice\": 12.00,\n      \"sellingPrice\": 18.00\n    }\n  ],\n  \"purchaseOrderItems\": [\n    {\n      \"poId\": \"PO-001\",\n      \"itemName\": \"Kitchen Cabinets\",\n      \"quantity\": 8,\n      \"unitCost\": 350.00\n    },\n    {\n      \"poId\": \"PO-002\",\n      \"itemName\": \"Countertop Granite\",\n      \"quantity\": 25,\n      \"unitCost\": 45.00\n    }\n  ],\n  \"otherExpenses\": [\n    {\n      \"description\": \"Labor - Installation Team\",\n      \"amount\": 2500,\n      \"category\": \"Labor\",\n      \"date\": \"2025-12-06\"\n    },\n    {\n      \"description\": \"Plumbing Fixtures\",\n      \"amount\": 800,\n      \"category\": \"Materials\",\n      \"date\": \"2025-12-05\"\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/job-costs",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "job-costs"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/stats?period=last30days",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "stats"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "last30days"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revenue Trend Chart",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/dashboard/charts/revenue-trend?period=last30days",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "dashboard",
+                "charts",
+                "revenue-trend"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "last30days"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "item": [
+        {
+          "name": "Sales Summary Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/reports/sales-summary?startDate=2025-12-01&endDate=2025-12-31",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "sales-summary"
+              ],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2025-12-01"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2025-12-31"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Profit Analysis Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/reports/profit-analysis?startDate=2025-12-01&endDate=2025-12-31",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "profit-analysis"
+              ],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2025-12-01"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2025-12-31"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Outstanding Payments Report",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/reports/outstanding-payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reports",
+                "outstanding-payments"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000/api"
+    },
+    {
+      "key": "token",
+      "value": ""
+    }
+  ]
+}
