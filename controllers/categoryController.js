@@ -1,6 +1,7 @@
 const Category = require('../models/Category');
 const { createApiResponse } = require('../utils/commonHelpers');
 const { errorResponse } = require('../utils/responseHandler');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
 
 // Helper function to determine company access
 const getCompanyQuery = (user, providedCompanyId = null) => {
@@ -17,7 +18,7 @@ exports.getCategories = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
-        // 🔥 CRITICAL FIX: Always require companyId - no global access
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
         let companyId;
         
         if (req.user.role === 'super-admin') {
@@ -27,8 +28,8 @@ exports.getCategories = async (req, res, next) => {
                 return createApiResponse(res, 400, 'companyId is required for super admin access');
             }
         } else {
-            // Regular company users can only access their own categories
-            companyId = req.user.id;
+            // Regular company users and admin users - use effectiveCompanyId
+            companyId = getEffectiveCompanyId(req.user).toString();
         }
 
         console.log(`🔍 CategoryController: Fetching categories for companyId: ${companyId}`.cyan);
@@ -60,7 +61,7 @@ exports.createCategory = async (req, res, next) => {
         const startTime = Date.now();
         const { name, companyId } = req.body;
 
-        // 🔥 CRITICAL FIX: Strict company ID validation
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
         let targetCompanyId;
         
         if (req.user.role === 'super-admin') {
@@ -70,11 +71,12 @@ exports.createCategory = async (req, res, next) => {
                 return createApiResponse(res, 400, 'companyId is required for super admin category creation');
             }
         } else {
-            // Regular company users can only create categories for their own company
-            targetCompanyId = req.user.id;
+            // Regular company users and admin users - use effectiveCompanyId
+            const effectiveCompanyId = getEffectiveCompanyId(req.user).toString();
+            targetCompanyId = effectiveCompanyId;
             
-            // Prevent company users from creating categories for other companies
-            if (companyId && companyId !== req.user.id) {
+            // Prevent users from creating categories for other companies
+            if (companyId && companyId !== effectiveCompanyId) {
                 return createApiResponse(res, 403, 'You can only create categories for your own company');
             }
         }
@@ -299,7 +301,7 @@ exports.fetchAllItemCategories = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
-        // 🔥 CRITICAL FIX: Always require companyId - no global access
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
         let companyId;
         
         if (req.user.role === 'super-admin') {
@@ -309,8 +311,8 @@ exports.fetchAllItemCategories = async (req, res, next) => {
                 return createApiResponse(res, 400, 'companyId is required for super admin access');
             }
         } else {
-            // Regular company users can only access their own items
-            companyId = req.user.id;
+            // Regular company users and admin users - use effectiveCompanyId
+            companyId = getEffectiveCompanyId(req.user).toString();
         }
 
         console.log(`🔍 CategoryController: Fetching all items for companyId: ${companyId}`.cyan);

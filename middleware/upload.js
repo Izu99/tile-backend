@@ -15,7 +15,7 @@ const mongoose = require('mongoose');
  */
 
 // Base storage path - one level above server directory using cross-platform path handling
-const BASE_STORAGE_PATH = path.resolve(__dirname, '..', '..', 'uploads_storage');
+const BASE_STORAGE_PATH = path.resolve(__dirname, '..', '..', 'tile_uploads');
 
 // 🔍 VERIFICATION: Log the resolved upload directory path on module load
 console.log('📁 Upload Middleware Configuration:'.green);
@@ -60,14 +60,28 @@ const storage = multer.diskStorage({
             // Ensure base storage directory exists
             ensureDirectoryExists(BASE_STORAGE_PATH);
 
+            // Get companyId from request (header or user object)
+            const companyId = req.headers['company-id'] || 
+                            (req.user && req.user.companyId) || 
+                            (req.user && req.user._id) || 
+                            'default';
+
+            console.log(`🏢 Company ID: ${companyId}`.cyan);
+
             // Get sub-folder based on fieldname
             const subFolder = getSubFolder(file.fieldname);
-            const fullPath = path.join(BASE_STORAGE_PATH, subFolder);
+            
+            // Create path: tile_uploads_storage/{companyId}/{subFolder}
+            const companyPath = path.join(BASE_STORAGE_PATH, companyId.toString());
+            const fullPath = path.join(companyPath, subFolder);
 
+            // Ensure company directory exists
+            ensureDirectoryExists(companyPath);
+            
             // Ensure sub-folder exists
             ensureDirectoryExists(fullPath);
 
-            console.log(`📂 Upload destination: ${fullPath} (fieldname: ${file.fieldname})`.cyan);
+            console.log(`📂 Upload destination: ${fullPath} (company: ${companyId}, fieldname: ${file.fieldname})`.cyan);
             cb(null, fullPath);
         } catch (error) {
             console.error('❌ Error setting upload destination:', error);
@@ -85,9 +99,15 @@ const storage = multer.diskStorage({
             // Create filename using generated ID
             const filename = `${generatedId}${ext}`;
 
+            // Get companyId
+            const companyId = req.headers['company-id'] || 
+                            (req.user && req.user.companyId) || 
+                            (req.user && req.user._id) || 
+                            'default';
+
             // Get sub-folder for relative path (use forward slashes for URLs)
             const subFolder = getSubFolder(file.fieldname);
-            const relativeFilePath = `${subFolder}/${filename}`; // Keep forward slashes for URLs
+            const relativeFilePath = `${companyId}/${subFolder}/${filename}`; // Include companyId in path
 
             // Pass data to controller via req object
             if (!req.uploadData) req.uploadData = {};
@@ -96,10 +116,12 @@ const storage = multer.diskStorage({
                 relativeFilePath: relativeFilePath,
                 originalName: file.originalname,
                 fieldname: file.fieldname,
-                subFolder: subFolder
+                subFolder: subFolder,
+                companyId: companyId.toString()
             };
 
             console.log(`🔄 Generated file data:`.cyan);
+            console.log(`   Company ID: ${companyId}`);
             console.log(`   ID: ${generatedId}`);
             console.log(`   Relative Path: ${relativeFilePath}`);
             console.log(`   Original: ${file.originalname}`);
@@ -218,7 +240,7 @@ function getFileUrl(relativeFilePath, req) {
     if (!relativeFilePath) return null;
 
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    return `${baseUrl}/uploads/${relativeFilePath}`;
+    return `${baseUrl}/tile_uploads/${relativeFilePath}`;
 }
 
 /**

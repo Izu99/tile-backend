@@ -5,6 +5,7 @@ const {
     createPaginationParams, 
     createApiResponse
 } = require('../utils/commonHelpers');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
 
 // @desc    Get project profitability report data - REFACTORED to use model static methods
 // @route   GET /api/reports/projects
@@ -24,7 +25,7 @@ exports.getProjectReport = async (req, res, next) => {
 
         // Use model's optimized method
         const result = await QuotationDocument.getProjectReportOptimized(
-            req.user.id, 
+            getEffectiveCompanyId(req.user), 
             { page, limit, ...filters }
         );
 
@@ -59,7 +60,7 @@ exports.getInvoiceReport = async (req, res, next) => {
 
         // Use model's optimized method
         const result = await QuotationDocument.getInvoiceReportOptimized(
-            req.user.id,
+            getEffectiveCompanyId(req.user),
             { page, limit, ...filters }
         );
 
@@ -85,7 +86,7 @@ exports.getDashboardSummary = async (req, res, next) => {
         const startTime = Date.now();
 
         // Use model's optimized method
-        const summary = await QuotationDocument.getDashboardSummaryOptimized(req.user.id);
+        const summary = await QuotationDocument.getDashboardSummaryOptimized(getEffectiveCompanyId(req.user));
 
         return createApiResponse(
             res,
@@ -120,7 +121,7 @@ exports.addDirectCost = async (req, res, next) => {
         // Use model's atomic method
         const updatedDocument = await QuotationDocument.addDirectCostAtomic(
             req.params.documentId,
-            req.user.id,
+            getEffectiveCompanyId(req.user),
             costData
         );
 
@@ -158,7 +159,7 @@ exports.getMaterialSalesReport = async (req, res, next) => {
 
         // Use model's optimized method
         const result = await QuotationDocument.getMaterialSalesReportOptimized(
-            req.user.id,
+            getEffectiveCompanyId(req.user),
             { page, limit, ...filters }
         );
 
@@ -192,7 +193,7 @@ exports.updateProjectStatus = async (req, res, next) => {
         // Use model's atomic method
         const updatedDocument = await QuotationDocument.updateProjectStatusAtomic(
             req.params.documentId,
-            req.user.id,
+            getEffectiveCompanyId(req.user),
             updateData
         );
 

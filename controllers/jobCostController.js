@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const JobCost = require('../models/JobCost');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const { createApiResponse } = require('../utils/commonHelpers');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
 
 /**
  * 🔥 LEAN JOB COST CONTROLLER
@@ -20,10 +21,12 @@ const { createApiResponse } = require('../utils/commonHelpers');
 exports.getJobCosts = async (req, res, next) => {
     try {
         const startTime = Date.now();
-        const userId = req.user.id;
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
         
         // 🔥 LEAN APPROACH: Use model static method for complex query logic
-        const result = await JobCost.getOptimizedList(userId, req.query);
+        const result = await JobCost.getOptimizedList(companyId, req.query);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Job Costs Query: ${dbTime}ms (${result.jobCosts.length}/${result.pagination.total} jobs, page ${result.pagination.page})`.cyan);
@@ -188,7 +191,7 @@ exports.reopenProject = async (req, res, next) => {
 
         // 🔥 ATOMIC OPERATION: Use findOneAndUpdate for atomic reopen
         const jobCost = await JobCost.findOneAndUpdate(
-            { _id: req.params.id, user: req.user.id, completed: true },
+            { _id: req.params.id, user: getEffectiveCompanyId(req.user), completed: true },
             { $set: { completed: false } },
             { new: true }
         ).lean({ virtuals: true });
@@ -217,7 +220,7 @@ exports.deleteJobCost = async (req, res, next) => {
         
         const jobCost = await JobCost.findOne({
             _id: req.params.id,
-            user: req.user.id,
+            user: getEffectiveCompanyId(req.user),
         });
 
         if (!jobCost) return errorResponse(res, 404, 'Job cost not found');
@@ -251,8 +254,8 @@ exports.getOtherExpenses = async (req, res, next) => {
         } else {
             query = {
                 $or: [
-                    { _id: req.params.jobCostId, user: req.user.id },
-                    { documentId: req.params.jobCostId, user: req.user.id }
+                    { _id: req.params.jobCostId, user: getEffectiveCompanyId(req.user) },
+                    { documentId: req.params.jobCostId, user: getEffectiveCompanyId(req.user) }
                 ]
             };
         }
@@ -370,3 +373,4 @@ exports.deleteOtherExpense = async (req, res, next) => {
         next(error);
     }
 };
+

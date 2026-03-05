@@ -42,10 +42,16 @@ class CacheService {
      * 🔥 GLOBAL STATISTICS AGGREGATION: Fetch and cache global system stats
      */
     static async fetchGlobalSystemStats() {
+        const startTime = Date.now();
+        console.log('');
+        console.log('═══════════════════════════════════════════════════════════');
+        console.log('🔄 CacheService.fetchGlobalSystemStats() START:', new Date().toISOString());
+        console.log('═══════════════════════════════════════════════════════════');
+        
         try {
-            const startTime = Date.now();
-            console.log('🚀 Fetching global system statistics...'.cyan);
-
+            console.log('📤 Step 1: Loading models...');
+            const modelLoadStart = Date.now();
+            
             // 🔥 SAFE MODEL ACCESS: Use utility to get models with error handling
             const { getModel } = require('../utils/modelLoader');
             
@@ -54,7 +60,14 @@ class CacheService {
             const MaterialSale = getModel('MaterialSale');
             const JobCost = getModel('JobCost');
             const PurchaseOrder = getModel('PurchaseOrder');
+            
+            const modelLoadDuration = Date.now() - modelLoadStart;
+            console.log(`✅ Step 1 Complete: Models loaded in ${modelLoadDuration}ms`);
 
+            console.log('');
+            console.log('📡 Step 2: Fetching data from all models (parallel)...');
+            const fetchStart = Date.now();
+            
             // Parallel execution of all global statistics
             const [
                 userStats,
@@ -73,7 +86,21 @@ class CacheService {
                 this.fetchRecentActivity(),
                 this.fetchRecentCompanies()
             ]);
+            
+            const fetchDuration = Date.now() - fetchStart;
+            console.log(`✅ Step 2 Complete: All data fetched in ${fetchDuration}ms`);
+            console.log(`   - User Stats: ${JSON.stringify(userStats?.stats || {})}`);
+            console.log(`   - Quotation Stats: ${JSON.stringify(quotationStats?.stats || {})}`);
+            console.log(`   - Material Sale Stats: ${JSON.stringify(materialSaleStats?.stats || {})}`);
+            console.log(`   - Job Cost Stats: ${JSON.stringify(jobCostStats?.stats || {})}`);
+            console.log(`   - Purchase Order Stats: ${JSON.stringify(purchaseOrderStats?.stats || {})}`);
+            console.log(`   - Recent Activity: ${recentActivity?.data?.length || 0} items`);
+            console.log(`   - Recent Companies: ${recentCompanies?.data?.length || 0} items`);
 
+            console.log('');
+            console.log('🔄 Step 3: Combining statistics...');
+            const combineStart = Date.now();
+            
             // Combine all statistics with fallback defaults
             const globalStats = {
                 // User/Company stats with fallbacks
@@ -109,16 +136,48 @@ class CacheService {
                     }
                 }
             };
+            
+            const combineDuration = Date.now() - combineStart;
+            console.log(`✅ Step 3 Complete: Statistics combined in ${combineDuration}ms`);
 
+            console.log('');
+            console.log('💾 Step 4: Caching results...');
+            const cacheStart = Date.now();
+            
             // Cache the results
             superAdminCache.set(CACHE_KEYS.SUPER_ADMIN_GLOBAL_STATS, globalStats);
             
+            const cacheDuration = Date.now() - cacheStart;
+            console.log(`✅ Step 4 Complete: Results cached in ${cacheDuration}ms`);
+            
             const totalTime = Date.now() - startTime;
-            console.log(`✅ Global system statistics cached: ${totalTime}ms`.green);
+            console.log('');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('✅ fetchGlobalSystemStats() SUCCESS');
+            console.log(`⏱️  Total Time: ${totalTime}ms`);
+            console.log(`   - Model Loading: ${modelLoadDuration}ms`);
+            console.log(`   - Data Fetching: ${fetchDuration}ms`);
+            console.log(`   - Combining: ${combineDuration}ms`);
+            console.log(`   - Caching: ${cacheDuration}ms`);
+            console.log(`📊 Final Stats: Companies=${globalStats.totalCompanies}, Categories=${globalStats.totalCategories}`);
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('');
             
             return globalStats;
         } catch (error) {
-            console.error('❌ CacheService.fetchGlobalSystemStats error:', error);
+            const totalDuration = Date.now() - startTime;
+            
+            console.log('');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('💥 fetchGlobalSystemStats() FAILED');
+            console.log(`⏱️  Failed after: ${totalDuration}ms`);
+            console.log(`❌ Error Type: ${error.constructor.name}`);
+            console.log(`❌ Error Message: ${error.message}`);
+            console.log('📍 Stack Trace:');
+            console.error(error.stack);
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('');
+            
             throw error;
         }
     }
@@ -310,30 +369,79 @@ class CacheService {
      * 🔥 CACHE RETRIEVAL: Get cached global stats or fetch if not cached
      */
     static async getGlobalSystemStats() {
+        const startTime = Date.now();
+        console.log('');
+        console.log('═══════════════════════════════════════════════════════════');
+        console.log('🔍 CacheService.getGlobalSystemStats() START:', new Date().toISOString());
+        console.log('═══════════════════════════════════════════════════════════');
+        
         try {
-            const startTime = Date.now();
+            console.log('📤 Step 1: Checking cache...');
+            console.log(`⏱️  Time: ${Date.now() - startTime}ms`);
+            console.log(`🔑 Cache Key: ${CACHE_KEYS.SUPER_ADMIN_GLOBAL_STATS}`);
             
             // Try cache first
             let cachedData = superAdminCache.get(CACHE_KEYS.SUPER_ADMIN_GLOBAL_STATS);
             
             if (cachedData) {
-                console.log('💾 Global stats: Cache hit (0ms response)'.green);
+                const cacheDuration = Date.now() - startTime;
+                console.log('');
+                console.log('═══════════════════════════════════════════════════════════');
+                console.log('✅ CACHE HIT - Returning cached data');
+                console.log(`⏱️  Total Time: ${cacheDuration}ms`);
+                console.log(`📊 Data keys: ${Object.keys(cachedData).join(', ')}`);
+                console.log('═══════════════════════════════════════════════════════════');
+                console.log('');
+                
                 return {
                     ...cachedData,
                     _performance: {
                         ...cachedData._performance,
                         cached: true,
-                        totalTimeMs: Date.now() - startTime
+                        totalTimeMs: cacheDuration
                     }
                 };
             }
 
             // Cache miss - fetch and cache
-            console.log('🔄 Global stats: Cache miss, fetching...'.cyan);
-            return await this.fetchGlobalSystemStats();
+            const cacheMissDuration = Date.now() - startTime;
+            console.log('');
+            console.log('❌ CACHE MISS - Fetching fresh data...');
+            console.log(`⏱️  Cache check took: ${cacheMissDuration}ms`);
+            console.log('');
+            console.log('📡 Step 2: Calling fetchGlobalSystemStats()...');
+            
+            const fetchStartTime = Date.now();
+            const result = await this.fetchGlobalSystemStats();
+            const fetchDuration = Date.now() - fetchStartTime;
+            const totalDuration = Date.now() - startTime;
+            
+            console.log('');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('✅ CACHE MISS - Fresh data fetched and cached');
+            console.log(`⏱️  Total Time: ${totalDuration}ms`);
+            console.log(`   - Cache Check: ${cacheMissDuration}ms`);
+            console.log(`   - Fetch Data: ${fetchDuration}ms`);
+            console.log(`📊 Data keys: ${Object.keys(result).join(', ')}`);
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('');
+            
+            return result;
             
         } catch (error) {
-            console.error('❌ CacheService.getGlobalSystemStats error:', error);
+            const totalDuration = Date.now() - startTime;
+            
+            console.log('');
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('💥 CacheService.getGlobalSystemStats() FAILED');
+            console.log(`⏱️  Failed after: ${totalDuration}ms`);
+            console.log(`❌ Error Type: ${error.constructor.name}`);
+            console.log(`❌ Error Message: ${error.message}`);
+            console.log('📍 Stack Trace:');
+            console.error(error.stack);
+            console.log('═══════════════════════════════════════════════════════════');
+            console.log('');
+            
             throw error;
         }
     }

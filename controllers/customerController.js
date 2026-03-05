@@ -1,6 +1,7 @@
 const Customer = require('../models/Customer');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const { createApiResponse } = require('../utils/commonHelpers');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
 
 /**
  * 🔥 LEAN CUSTOMER CONTROLLER
@@ -48,7 +49,9 @@ exports.searchCustomer = async (req, res, next) => {
 exports.createCustomer = async (req, res, next) => {
     try {
         const startTime = Date.now();
-        req.body.user = req.user.id;
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data creation
+        req.body.user = getEffectiveCompanyId(req.user);
 
         // 🔥 BUSINESS LOGIC: Use model static method for creation with validation
         const customer = await Customer.createCustomer(req.body);

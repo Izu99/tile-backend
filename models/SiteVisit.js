@@ -683,7 +683,7 @@ siteVisitSchema.statics.getOptimizedList = async function(companyId, options = {
   const [total, siteVisits] = await Promise.all([
     this.countDocuments(query),
     this.find(query)
-      .select('id customerName projectTitle date charge status contactNo location createdAt')
+      .select('id customerName projectTitle date charge status contactNo location colorCode thickness floorCondition targetArea inspection otherDetails siteType linkedInvoiceId createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))

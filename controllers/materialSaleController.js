@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const MaterialSale = require('../models/MaterialSale');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
 const { createApiResponse } = require('../utils/commonHelpers');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
 
 /**
  * 🔥 LEAN MATERIAL SALE CONTROLLER
@@ -19,10 +20,12 @@ const { createApiResponse } = require('../utils/commonHelpers');
 exports.getMaterialSales = async (req, res, next) => {
     try {
         const startTime = Date.now();
-        const userId = req.user.id;
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
         
         // 🔥 LEAN APPROACH: Use model static method for complex query logic
-        const result = await MaterialSale.getOptimizedList(userId, req.query);
+        const result = await MaterialSale.getOptimizedList(companyId, req.query);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Material Sales Query: ${dbTime}ms (${result.materialSales.length}/${result.pagination.total} sales, page ${result.pagination.page})`.cyan);
@@ -62,7 +65,7 @@ exports.getMaterialSale = async (req, res, next) => {
         // 🔥 LEAN VIRTUALS: Use lean() with virtuals for memory optimization + virtual fields
         const materialSale = await MaterialSale.findOne({
             _id: req.params.id,
-            user: req.user.id,
+            user: getEffectiveCompanyId(req.user),
         }).lean({ virtuals: true });
 
         if (!materialSale) return errorResponse(res, 404, 'Material sale not found');
@@ -84,10 +87,12 @@ exports.getMaterialSale = async (req, res, next) => {
 exports.createMaterialSale = async (req, res, next) => {
     try {
         const startTime = Date.now();
-        const userId = req.user.id;
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data creation
+        const companyId = getEffectiveCompanyId(req.user);
         
         // 🔥 ATOMIC ID GENERATION: Use model static method with retry logic
-        const materialSale = await MaterialSale.createNewWithAtomicId(userId, req.body);
+        const materialSale = await MaterialSale.createNewWithAtomicId(companyId, req.body);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Create Material Sale: ${dbTime}ms (Invoice: ${materialSale.invoiceNumber})`.cyan);
@@ -114,7 +119,7 @@ exports.updateMaterialSale = async (req, res, next) => {
         
         // 🔥 LEAN VIRTUALS: Use atomic findOneAndUpdate with lean virtuals
         const materialSale = await MaterialSale.findOneAndUpdate(
-            { _id: req.params.id, user: req.user.id },
+            { _id: req.params.id, user: getEffectiveCompanyId(req.user) },
             req.body,
             { new: true, runValidators: true }
         ).lean({ virtuals: true });

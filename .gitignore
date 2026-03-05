@@ -9,7 +9,7 @@ yarn.lock
 .env.*.local
 
 # Uploads
-uploads/
+tile_uploads/
 *.jpg
 *.jpeg
 *.png

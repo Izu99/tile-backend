@@ -77,26 +77,54 @@ router.post('/user/avatar',
             // Delete old avatar if exists
             if (user.avatarPath) {
                 const { deleteFile } = require('../middleware/upload');
-                deleteFile(user.avatarPath);
+                const deleted = deleteFile(user.avatarPath);
+                if (deleted) {
+                    console.log(`🗑️ Old avatar deleted: ${user.avatarPath}`);
+                } else {
+                    console.log(`⚠️ Failed to delete old avatar: ${user.avatarPath}`);
+                }
+            } else {
+                console.log('ℹ️ No old avatar to delete');
             }
 
-            // Update user with new avatar data
-            user.avatarId = avatarData.generatedId;
-            user.avatarPath = avatarData.relativeFilePath;
-            user.originalAvatarName = avatarData.originalName;
-            
-            await user.save();
+            // Update user with new avatar data using findByIdAndUpdate to avoid validation issues
+            const updatedUser = await User.findByIdAndUpdate(
+                req.user._id,
+                {
+                    $set: {
+                        avatarId: avatarData.generatedId,
+                        avatarPath: avatarData.relativeFilePath,
+                        originalAvatarName: avatarData.originalName,
+                        avatar: '' // Clear legacy base64 field
+                    }
+                },
+                { new: true, runValidators: false } // Skip validation to avoid counter issues
+            );
+
+            if (!updatedUser) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found during update'
+                });
+            }
+
+            console.log('✅ Avatar saved to MongoDB:', {
+                userId: updatedUser._id,
+                avatarId: updatedUser.avatarId,
+                avatarPath: updatedUser.avatarPath,
+                originalName: updatedUser.originalAvatarName
+            });
 
             // Generate avatar URL for response
             const { getFileUrl } = require('../middleware/upload');
-            const avatarUrl = getFileUrl(user.avatarPath, req);
+            const avatarUrl = getFileUrl(updatedUser.avatarPath, req);
 
             res.status(200).json({
                 success: true,
                 message: 'Avatar uploaded successfully',
                 data: {
-                    avatarId: user.avatarId,
-                    avatarPath: user.avatarPath,
+                    avatarId: updatedUser.avatarId,
+                    avatarPath: updatedUser.avatarPath,
                     avatarUrl: avatarUrl
                 }
             });
@@ -137,26 +165,54 @@ router.post('/user/signature',
             // Delete old signature if exists
             if (user.signaturePath) {
                 const { deleteFile } = require('../middleware/upload');
-                deleteFile(user.signaturePath);
+                const deleted = deleteFile(user.signaturePath);
+                if (deleted) {
+                    console.log(`🗑️ Old signature deleted: ${user.signaturePath}`);
+                } else {
+                    console.log(`⚠️ Failed to delete old signature: ${user.signaturePath}`);
+                }
+            } else {
+                console.log('ℹ️ No old signature to delete');
             }
 
-            // Update user with new signature data
-            user.signatureId = signatureData.generatedId;
-            user.signaturePath = signatureData.relativeFilePath;
-            user.originalSignatureName = signatureData.originalName;
-            
-            await user.save();
+            // Update user with new signature data using findByIdAndUpdate to avoid validation issues
+            const updatedUser = await User.findByIdAndUpdate(
+                req.user._id,
+                {
+                    $set: {
+                        signatureId: signatureData.generatedId,
+                        signaturePath: signatureData.relativeFilePath,
+                        originalSignatureName: signatureData.originalName,
+                        signature: '' // Clear legacy base64 field
+                    }
+                },
+                { new: true, runValidators: false } // Skip validation to avoid counter issues
+            );
+
+            if (!updatedUser) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'User not found during update'
+                });
+            }
+
+            console.log('✅ Signature saved to MongoDB:', {
+                userId: updatedUser._id,
+                signatureId: updatedUser.signatureId,
+                signaturePath: updatedUser.signaturePath,
+                originalName: updatedUser.originalSignatureName
+            });
 
             // Generate signature URL for response
             const { getFileUrl } = require('../middleware/upload');
-            const signatureUrl = getFileUrl(user.signaturePath, req);
+            const signatureUrl = getFileUrl(updatedUser.signaturePath, req);
 
             res.status(200).json({
                 success: true,
                 message: 'Signature uploaded successfully',
                 data: {
-                    signatureId: user.signatureId,
-                    signaturePath: user.signaturePath,
+                    signatureId: updatedUser.signatureId,
+                    signaturePath: updatedUser.signaturePath,
                     signatureUrl: signatureUrl
                 }
             });

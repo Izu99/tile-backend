@@ -118,36 +118,12 @@ exports.login = async (req, res, next) => {
 
         console.log(`✅ PASSWORD MATCH: Authentication successful`);
 
-        // 🔥 STEP 4: ASYNC DATABASE UPDATE (Last Login) - NON-BLOCKING
-        console.log(`💾 DATABASE: Scheduling async last login update`);
-        const asyncUpdateStart = Date.now();
-        
-        // 🚀 PERFORMANCE BOOST: Update last login asynchronously (fire-and-forget)
-        // This allows the API to return immediately without waiting for the update
-        setImmediate(async () => {
-            try {
-                const updateStart = Date.now();
-                await User.findByIdAndUpdate(
-                    user._id, 
-                    { lastLoginAt: Date.now() },
-                    { lean: true }
-                );
-                const updateTime = Date.now() - updateStart;
-                console.log(`✅ ASYNC: Last login updated in ${updateTime}ms (background)`);
-                
-                if (updateTime > 5000) {
-                    console.log(`⚠️  SLOW ASYNC UPDATE: ${updateTime}ms - check database performance`);
-                }
-            } catch (asyncError) {
-                console.error('❌ ASYNC: Last login update failed (non-critical):', asyncError.message);
-            }
-        });
-        
-        const asyncScheduleTime = Date.now() - asyncUpdateStart;
-        console.log(`⚡ DATABASE: Async update scheduled in ${asyncScheduleTime}ms`);
-        
-        // Set updateTime to 0 since we're not waiting for the actual update
-        const updateTime = asyncScheduleTime;
+        // 🔥 STEP 4: LAST LOGIN UPDATE - DISABLED FOR PERFORMANCE
+        // Last login tracking disabled to prevent 5+ second delays
+        // This was causing "Not Responding" issues in the frontend
+        // TODO: Implement proper background job queue if needed
+        console.log(`⚡ PERFORMANCE: Last login update disabled (was causing 5s+ delays)`);
+        const updateTime = 0;
 
         // 🔥 STEP 5: TOKEN GENERATION TIMING
         console.time('Token Generation');
@@ -183,6 +159,8 @@ exports.login = async (req, res, next) => {
         const responseStart = Date.now();
         console.log(`📦 RESPONSE: Preparing user data`);
         
+        // 🔥 CRITICAL FIX: Use toLoginJSON() method for optimized response
+        // This automatically excludes Base64 data and handles super-admin optimization
         const userData = {
             _id: user._id,
             id: user._id,
@@ -194,21 +172,53 @@ exports.login = async (req, res, next) => {
             lastLoginAt: Date.now(),
             companyName: user.companyName || '',
             
-            // 🔥 AVATAR FIELDS: Include for profile display
-            avatarId: user.avatarId || '',
-            avatarPath: user.avatarPath || '',
-            avatarUrl: user.avatarPath ? `${req.protocol}://${req.get('host')}/uploads/${user.avatarPath}` : null,
-            signatureId: user.signatureId || '',
-            signaturePath: user.signaturePath || '',
-            signatureUrl: user.signaturePath ? `${req.protocol}://${req.get('host')}/uploads/${user.signaturePath}` : null,
-            avatar: user.avatar || '', // Backward compatibility
-            signature: user.signature || '', // Backward compatibility
-            
             // 🔥 MINIMAL COUNTERS: Only essential ones for initial UI
             totalQuotationsCount: user.totalQuotationsCount || 0,
             totalInvoicesCount: user.totalInvoicesCount || 0,
             totalPurchaseOrdersCount: user.totalPurchaseOrdersCount || 0,
         };
+        
+        // 🔥 CRITICAL PERFORMANCE FIX: Exclude ALL image fields for super-admin
+        // Super admins don't need avatar/signature data (saves ~518KB per request)
+        if (user.role !== 'super-admin') {
+            // 🔥 MULTI-USER FIX: Admin users ALWAYS inherit avatar from company owner
+            let avatarPath = user.avatarPath;
+            let avatarId = user.avatarId;
+            let signaturePath = user.signaturePath;
+            let signatureId = user.signatureId;
+            
+            // If admin user, always fetch from company owner (override any existing paths)
+            if (user.role === 'admin' && user.companyId) {
+                try {
+                    const companyOwner = await User.findById(user.companyId)
+                        .select('avatarPath avatarId signaturePath signatureId')
+                        .lean();
+                    
+                    if (companyOwner) {
+                        // Always use company owner's avatar/signature for admin users
+                        avatarPath = companyOwner.avatarPath;
+                        avatarId = companyOwner.avatarId;
+                        signaturePath = companyOwner.signaturePath;
+                        signatureId = companyOwner.signatureId;
+                        console.log('✅ Admin user inheriting avatar from company owner');
+                    }
+                } catch (err) {
+                    console.log('⚠️ Could not fetch company owner avatar:', err.message);
+                }
+            }
+            
+            // Only include image paths for company users (NOT Base64 data)
+            userData.avatarId = avatarId || '';
+            userData.avatarPath = avatarPath || '';
+            userData.avatarUrl = avatarPath ? `${req.protocol}://${req.get('host')}/tile_uploads/${avatarPath}` : null;
+            userData.signatureId = signatureId || '';
+            userData.signaturePath = signaturePath || '';
+            userData.signatureUrl = signaturePath ? `${req.protocol}://${req.get('host')}/tile_uploads/${signaturePath}` : null;
+            // 🔥 CRITICAL: Do NOT include Base64 data - too large!
+            // userData.avatar = user.avatar || '';
+            // userData.signature = user.signature || '';
+        }
+        // For super-admin: NO image fields at all
 
         const responseData = { token, user: userData };
         const responseSize = JSON.stringify(responseData).length;
@@ -218,8 +228,12 @@ exports.login = async (req, res, next) => {
         console.log(`📦 RESPONSE: Data preparation took ${responseTime}ms`);
         console.log(`📊 RESPONSE: Size ${responseSize} bytes (${(responseSize / 1024).toFixed(2)} KB)`);
         
-        if (responseSize > 5000) {
-            console.log(`⚠️  LARGE RESPONSE: ${responseSize} bytes (>5KB) - potential bottleneck!`);
+        if (responseSize > 50000) {
+            console.log(`🚨 CRITICAL: Response size ${responseSize} bytes (>50KB) - TOO LARGE!`);
+        } else if (responseSize > 5000) {
+            console.log(`⚠️  WARNING: Response size ${responseSize} bytes (>5KB) - could be optimized`);
+        } else {
+            console.log(`✅ EXCELLENT: Response size ${responseSize} bytes (<5KB) - optimized!`);
         }
 
         // 🔥 FINAL TIMING SUMMARY
@@ -283,8 +297,39 @@ exports.getMe = async (req, res, next) => {
 
         // Convert to object and add avatar URLs
         const userData = user.toObject();
-        userData.avatarUrl = user.getAvatarUrl(req);
-        userData.signatureUrl = user.getSignatureUrl(req);
+        
+        // 🔥 MULTI-USER FIX: Admin users ALWAYS inherit avatar from company owner
+        if (user.role === 'admin' && user.companyId) {
+            try {
+                const companyOwner = await User.findById(user.companyId)
+                    .select('avatarPath avatarId signaturePath signatureId')
+                    .lean();
+                
+                if (companyOwner) {
+                    // Always use company owner's avatar/signature for admin users
+                    userData.avatarPath = companyOwner.avatarPath;
+                    userData.avatarId = companyOwner.avatarId;
+                    userData.signaturePath = companyOwner.signaturePath;
+                    userData.signatureId = companyOwner.signatureId;
+                    userData.avatarUrl = companyOwner.avatarPath ? `${req.protocol}://${req.get('host')}/tile_uploads/${companyOwner.avatarPath}` : null;
+                    userData.signatureUrl = companyOwner.signaturePath ? `${req.protocol}://${req.get('host')}/tile_uploads/${companyOwner.signaturePath}` : null;
+                    console.log('✅ Admin user inheriting avatar from company owner');
+                }
+            } catch (err) {
+                console.log('⚠️ Could not fetch company owner avatar:', err.message);
+            }
+        } else {
+            userData.avatarUrl = user.getAvatarUrl(req);
+            userData.signatureUrl = user.getSignatureUrl(req);
+        }
+
+        // Debug logging for avatar data
+        console.log('📸 getMe - Avatar data for user:', req.user.id);
+        console.log('   avatarId:', userData.avatarId);
+        console.log('   avatarPath:', userData.avatarPath);
+        console.log('   avatarUrl:', userData.avatarUrl);
+        console.log('   signaturePath:', userData.signaturePath);
+        console.log('   signatureUrl:', userData.signatureUrl);
 
         return createApiResponse(
             res,
@@ -334,10 +379,10 @@ exports.getMeFull = async (req, res, next) => {
             // File upload fields (paths only, not Base64 data)
             avatarId: user.avatarId || '',
             avatarPath: user.avatarPath || '',
-            avatarUrl: user.getAvatarUrl(req), // Generate avatar URL
+            avatarUrl: user.avatarPath ? `${req.protocol}://${req.get('host')}/tile_uploads/${user.avatarPath}` : null,
             signatureId: user.signatureId || '',
             signaturePath: user.signaturePath || '',
-            signatureUrl: user.getSignatureUrl(req), // Generate signature URL
+            signatureUrl: user.signaturePath ? `${req.protocol}://${req.get('host')}/tile_uploads/${user.signaturePath}` : null,
             
             // All computed counters for dashboard
             totalCategoriesCount: user.totalCategoriesCount || 0,
@@ -379,25 +424,58 @@ exports.getProfile = async (req, res, next) => {
 
         // Use lean query for faster retrieval of profile fields including file upload fields
         const user = await User.findById(req.user.id)
-            .select('avatar signature termsAndConditions bankDetails avatarId avatarPath originalAvatarName signatureId signaturePath originalSignatureName')
+            .select('avatar signature termsAndConditions bankDetails avatarId avatarPath originalAvatarName signatureId signaturePath originalSignatureName role companyId')
             .lean();
         
         if (!user) {
             return errorResponse(res, 404, 'User not found');
         }
 
+        // 🔥 MULTI-USER FIX: Admin users ALWAYS inherit avatar from company owner
+        let avatarPath = user.avatarPath;
+        let avatarId = user.avatarId;
+        let signaturePath = user.signaturePath;
+        let signatureId = user.signatureId;
+        
+        if (user.role === 'admin' && user.companyId) {
+            try {
+                const companyOwner = await User.findById(user.companyId)
+                    .select('avatarPath avatarId signaturePath signatureId')
+                    .lean();
+                
+                if (companyOwner) {
+                    // Always use company owner's avatar/signature for admin users
+                    avatarPath = companyOwner.avatarPath;
+                    avatarId = companyOwner.avatarId;
+                    signaturePath = companyOwner.signaturePath;
+                    signatureId = companyOwner.signatureId;
+                    console.log('✅ Admin user inheriting avatar from company owner');
+                }
+            } catch (err) {
+                console.log('⚠️ Could not fetch company owner avatar:', err.message);
+            }
+        }
+
         // Generate avatar and signature URLs if paths exist
-        const avatarUrl = user.avatarPath ? `${req.protocol}://${req.get('host')}/uploads/${user.avatarPath}` : null;
-        const signatureUrl = user.signaturePath ? `${req.protocol}://${req.get('host')}/uploads/${user.signaturePath}` : null;
+        const avatarUrl = avatarPath ? `${req.protocol}://${req.get('host')}/tile_uploads/${avatarPath}` : null;
+        const signatureUrl = signaturePath ? `${req.protocol}://${req.get('host')}/tile_uploads/${signaturePath}` : null;
+
+        // Debug logging for avatar data
+        console.log('📸 getProfile - Avatar data for user:', req.user.id);
+        console.log('   avatarId:', avatarId);
+        console.log('   avatarPath:', avatarPath);
+        console.log('   avatarUrl:', avatarUrl);
+        console.log('   signaturePath:', signaturePath);
+        console.log('   signatureUrl:', signatureUrl);
 
         // Return profile data with both old and new fields for compatibility
         const profileData = {
             // File upload fields (new)
-            avatarId: user.avatarId || '',
-            avatarPath: user.avatarPath || '',
+            avatarId: avatarId || '',
+            avatarPath: avatarPath || '',
             avatarUrl: avatarUrl,
-            signatureId: user.signatureId || '',
-            signaturePath: user.signaturePath || '',
+            signatureId: signatureId || '',
+            signaturePath: signaturePath || '',
             signatureUrl: signatureUrl,
             // Backward compatibility fields (old)
             avatar: user.avatar || '',
@@ -481,6 +559,60 @@ exports.updateProfile = async (req, res, next) => {
         const user = await User.findById(req.user.id);
         if (!user) {
             return errorResponse(res, 404, 'User not found');
+        }
+
+        // 🔥 PROFILE IMAGE REPLACEMENT: Delete old avatar file if new one is uploaded
+        if (req.uploadData && req.uploadData.avatar) {
+            console.log('🖼️ New avatar uploaded, checking for old file to delete'.cyan);
+            
+            // Get old avatar path from user document
+            const oldAvatarPath = user.avatarPath;
+            
+            if (oldAvatarPath) {
+                console.log(`🗑️ Deleting old avatar: ${oldAvatarPath}`.yellow);
+                const { deleteFile } = require('../middleware/upload');
+                const deleted = deleteFile(oldAvatarPath);
+                
+                if (deleted) {
+                    console.log('✅ Old avatar deleted successfully'.green);
+                } else {
+                    console.log('⚠️ Old avatar file not found or could not be deleted'.yellow);
+                }
+            }
+            
+            // Update user with new avatar data
+            req.body.avatarId = req.uploadData.avatar.generatedId;
+            req.body.avatarPath = req.uploadData.avatar.relativeFilePath;
+            req.body.originalAvatarName = req.uploadData.avatar.originalName;
+            
+            console.log(`✅ New avatar set: ${req.uploadData.avatar.relativeFilePath}`.green);
+        }
+
+        // 🔥 SIGNATURE REPLACEMENT: Delete old signature file if new one is uploaded
+        if (req.uploadData && req.uploadData.signature) {
+            console.log('✍️ New signature uploaded, checking for old file to delete'.cyan);
+            
+            // Get old signature path from user document
+            const oldSignaturePath = user.signaturePath;
+            
+            if (oldSignaturePath) {
+                console.log(`🗑️ Deleting old signature: ${oldSignaturePath}`.yellow);
+                const { deleteFile } = require('../middleware/upload');
+                const deleted = deleteFile(oldSignaturePath);
+                
+                if (deleted) {
+                    console.log('✅ Old signature deleted successfully'.green);
+                } else {
+                    console.log('⚠️ Old signature file not found or could not be deleted'.yellow);
+                }
+            }
+            
+            // Update user with new signature data
+            req.body.signatureId = req.uploadData.signature.generatedId;
+            req.body.signaturePath = req.uploadData.signature.relativeFilePath;
+            req.body.originalSignatureName = req.uploadData.signature.originalName;
+            
+            console.log(`✅ New signature set: ${req.uploadData.signature.relativeFilePath}`.green);
         }
 
         // Use model's secure update method with field validation

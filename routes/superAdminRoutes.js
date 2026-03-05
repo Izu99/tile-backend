@@ -12,7 +12,11 @@ const {
     deleteCategory,
     addItemToCategory,
     updateItem,
-    deleteItem
+    deleteItem,
+    getCompanyUsers,
+    createCompanyUser,
+    updateCompanyUser,
+    deleteCompanyUser
 } = require('../controllers/superAdminController');
 
 const { protect, authorize } = require('../middleware/auth');
@@ -53,5 +57,14 @@ router.route('/categories/:id/items')
 router.route('/categories/:catId/items/:itemId')
     .put(updateItem)
     .delete(deleteItem);
+
+// Company Users
+router.route('/companies/:companyId/users')
+    .get(getCompanyUsers)
+    .post(createCompanyUser);
+
+router.route('/users/:userId')
+    .put(updateCompanyUser)
+    .delete(deleteCompanyUser);
 
 module.exports = router;

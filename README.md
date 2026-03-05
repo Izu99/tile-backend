@@ -56,7 +56,7 @@ JWT_EXPIRE=30d
 
 # File Upload
 MAX_FILE_SIZE=5242880
-UPLOAD_PATH=./uploads
+UPLOAD_PATH=./tile_uploads
 
 # Rate Limiting
 RATE_LIMIT_MAX=100

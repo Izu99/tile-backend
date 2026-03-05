@@ -22,7 +22,7 @@ const UserSchema = new mongoose.Schema(
         email: {
             type: String,
             required: [true, 'Please add an email'],
-            unique: true,
+            unique: true, // This creates the index automatically, no need for explicit index
             lowercase: true,
             match: [
                 /^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/,
@@ -61,8 +61,13 @@ const UserSchema = new mongoose.Schema(
         },
         role: {
             type: String,
-            enum: ['super-admin', 'company', 'customer'],
+            enum: ['super-admin', 'company', 'customer', 'admin'],
             default: 'company',
+        },
+        companyId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
         },
         mustChangePassword: {
             type: Boolean,
@@ -578,11 +583,14 @@ UserSchema.statics.getForManagement = async function(options = {}) {
 };
 
 // 🔥 HIGH-PERFORMANCE INDEXING FOR AUTH AND MANAGEMENT
+// Compound indexes for filtered queries
 UserSchema.index({ email: 1, isActive: 1 });
 UserSchema.index({ role: 1, isActive: 1, createdAt: -1 });
-// Email unique index is handled by unique: true in field definition
 UserSchema.index({ role: 1, companyName: 1 });
 UserSchema.index({ lastLoginAt: -1, isActive: 1 });
+
+// Note: email field already has unique: true in schema definition, 
+// so no need for explicit email index
 
 // 🔥 ENHANCED PRE-SAVE MIDDLEWARE
 UserSchema.pre('save', async function (next) {
@@ -640,7 +648,7 @@ UserSchema.statics.findForAuthentication = async function(email) {
         const queryStart = Date.now();
         
         const user = await this.findOne({ email })
-            .select('+password _id name email role isActive mustChangePassword companyName totalQuotationsCount totalInvoicesCount totalPurchaseOrdersCount avatarId avatarPath signatureId signaturePath avatar signature')
+            .select('+password _id name email role isActive mustChangePassword companyName companyId totalQuotationsCount totalInvoicesCount totalPurchaseOrdersCount avatarId avatarPath signatureId signaturePath avatar signature')
             .lean(); // Use lean() for 2-3x faster queries
             
         const queryTime = Date.now() - queryStart;
@@ -675,7 +683,7 @@ UserSchema.statics.findForAuthentication = async function(email) {
 
 // 🔥 LIGHTWEIGHT LOGIN RESPONSE: Only essential data for initial authentication
 UserSchema.methods.toLoginJSON = function() {
-    return {
+    const baseData = {
         _id: this._id,
         id: this._id,
         name: this.name,
@@ -695,11 +703,29 @@ UserSchema.methods.toLoginJSON = function() {
         totalInvoicesCount: this.totalInvoicesCount || 0,
         totalPurchaseOrdersCount: this.totalPurchaseOrdersCount || 0,
     };
+    
+    // 🔥 CRITICAL PERFORMANCE FIX: Completely exclude ALL image fields for super-admin
+    // Super admins don't need avatar/signature data in login response (saves ~518KB)
+    // DO NOT include Base64 data, paths, IDs, or URLs
+    if (this.role !== 'super-admin') {
+        // Only include image data for non-super-admin users
+        // Use file paths instead of Base64 for better performance
+        baseData.avatarId = this.avatarId || '';
+        baseData.avatarPath = this.avatarPath || '';
+        baseData.signatureId = this.signatureId || '';
+        baseData.signaturePath = this.signaturePath || '';
+        // 🔥 CRITICAL: Do NOT include Base64 avatar/signature in login response
+        // These are huge and should only be loaded when needed
+        // baseData.avatar = this.avatar || '';
+        // baseData.signature = this.signature || '';
+    }
+    
+    return baseData;
 };
 
 // Return safe user data for authentication responses (FULL VERSION - use for profile endpoints)
 UserSchema.methods.toAuthJSON = function() {
-    return {
+    const baseData = {
         _id: this._id,
         id: this._id,
         name: this.name,
@@ -715,17 +741,6 @@ UserSchema.methods.toAuthJSON = function() {
         lastLoginAt: this.lastLoginAt,
         createdAt: this.createdAt,
         updatedAt: this.updatedAt,
-        
-        // File upload fields
-        avatarId: this.avatarId || '',
-        avatarPath: this.avatarPath || '',
-        signatureId: this.signatureId || '',
-        signaturePath: this.signaturePath || '',
-        
-        // Backward compatibility
-        avatar: this.avatar || '',
-        signature: this.signature || '',
-        
         termsAndConditions: this.termsAndConditions || '',
         bankDetails: this.bankDetails || {},
         
@@ -746,6 +761,24 @@ UserSchema.methods.toAuthJSON = function() {
         materialSaleCounter: this.materialSaleCounter || 0,
         jobCostCounter: this.jobCostCounter || 0,
     };
+    
+    // 🔥 CRITICAL PERFORMANCE FIX: Exclude ALL image fields for super-admin
+    // Super admins don't need avatar/signature data (saves ~518KB per request)
+    // DO NOT include Base64 data, paths, IDs, or URLs
+    if (this.role !== 'super-admin') {
+        // Only include image data for non-super-admin users
+        // Use file paths instead of Base64 for better performance
+        baseData.avatarId = this.avatarId || '';
+        baseData.avatarPath = this.avatarPath || '';
+        baseData.signatureId = this.signatureId || '';
+        baseData.signaturePath = this.signaturePath || '';
+        // 🔥 CRITICAL: Do NOT include Base64 avatar/signature in auth response
+        // These are huge and should only be loaded when specifically requested
+        // baseData.avatar = this.avatar || '';
+        // baseData.signature = this.signature || '';
+    }
+    
+    return baseData;
 };
 
 // 🔥 SAFE USER FIELDS: Constant for consistent field selection across auth endpoints
@@ -763,11 +796,11 @@ UserSchema.methods.getAvatarUrl = function(req) {
     
     if (req) {
         const baseUrl = `${req.protocol}://${req.get('host')}`;
-        return `${baseUrl}/uploads/${this.avatarPath}`;
+        return `${baseUrl}/tile_uploads/${this.avatarPath}`;
     }
     
     // Fallback for cases without request object
-    return `/uploads/${this.avatarPath}`;
+    return `/tile_uploads/${this.avatarPath}`;
 };
 
 // 🔥 SIGNATURE URL GENERATION METHOD
@@ -776,11 +809,11 @@ UserSchema.methods.getSignatureUrl = function(req) {
     
     if (req) {
         const baseUrl = `${req.protocol}://${req.get('host')}`;
-        return `${baseUrl}/uploads/${this.signaturePath}`;
+        return `${baseUrl}/tile_uploads/${this.signaturePath}`;
     }
     
     // Fallback for cases without request object
-    return `/uploads/${this.signaturePath}`;
+    return `/tile_uploads/${this.signaturePath}`;
 };
 
 // 🔥 SECURE PROFILE UPDATE METHOD

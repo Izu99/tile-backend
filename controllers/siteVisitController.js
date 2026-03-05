@@ -1,6 +1,7 @@
 const SiteVisit = require('../models/SiteVisit');
 const responseHandler = require('../utils/responseHandler');
 const { logPerformance, createApiResponse } = require('../utils/commonHelpers');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
 
 /**
  * 🔥 LEAN SITE VISIT CONTROLLER
@@ -18,7 +19,7 @@ const { logPerformance, createApiResponse } = require('../utils/commonHelpers');
 const getSiteVisits = async (req, res) => {
   try {
     const startTime = Date.now();
-    const companyId = req.user.id;
+    const companyId = getEffectiveCompanyId(req.user);
     
     // 🔍 ENHANCED DEBUG LOGGING: Track company context
     console.log(`🏢 Site Visits Request Debug:`.yellow);
@@ -83,7 +84,7 @@ const getSiteVisit = async (req, res) => {
     // 🔥 LEAN VIRTUALS: Use lean() with virtuals for memory optimization + virtual fields
     const siteVisit = await SiteVisit.findOne({
       id: req.params.id,
-      companyId: req.user.id
+      companyId: getEffectiveCompanyId(req.user)
     }).lean({ virtuals: true });
 
     if (!siteVisit) {
@@ -107,7 +108,7 @@ const getSiteVisit = async (req, res) => {
 const createSiteVisit = async (req, res) => {
   try {
     const startTime = Date.now();
-    const companyId = req.user.id;
+    const companyId = getEffectiveCompanyId(req.user);
     
     // 🔍 ENHANCED DEBUG LOGGING: Track creation data
     console.log(`🏗️ Creating Site Visit Debug:`.green);
@@ -131,6 +132,10 @@ const createSiteVisit = async (req, res) => {
     console.log(`   Customer: ${siteVisit.customerName}`.blue);
     console.log(`   Project: ${siteVisit.projectTitle}`.blue);
     console.log(`   Contact: ${siteVisit.contactNo}`.blue);
+    console.log(`   Color Code: ${siteVisit.colorCode}`.blue);
+    console.log(`   Thickness: ${siteVisit.thickness}`.blue);
+    console.log(`   Floor Condition: ${JSON.stringify(siteVisit.floorCondition)}`.blue);
+    console.log(`   Target Area: ${JSON.stringify(siteVisit.targetArea)}`.blue);
     console.log(`   Inspection: ${JSON.stringify(siteVisit.inspection)}`.blue);
 
     // 🔥 CONSISTENT API RESPONSE: Use createApiResponse helper
@@ -153,7 +158,7 @@ const createSiteVisit = async (req, res) => {
 const updateSiteVisit = async (req, res) => {
   try {
     const startTime = Date.now();
-    const companyId = req.user.id;
+    const companyId = getEffectiveCompanyId(req.user);
     
     // 🔥 VALIDATION: Ensure required fields are not empty
     const updateData = { ...req.body, updatedAt: Date.now() };
@@ -193,7 +198,7 @@ const updateSiteVisit = async (req, res) => {
 const deleteSiteVisit = async (req, res) => {
   try {
     const startTime = Date.now();
-    const companyId = req.user.id;
+    const companyId = getEffectiveCompanyId(req.user);
     
     // 🔥 MIDDLEWARE HANDLES: Dashboard counter decrement + cache invalidation
     const siteVisit = await SiteVisit.findOneAndDelete({
@@ -221,7 +226,7 @@ const deleteSiteVisit = async (req, res) => {
 const getSiteVisitStats = async (req, res) => {
   try {
     const startTime = Date.now();
-    const companyId = req.user.id;
+    const companyId = getEffectiveCompanyId(req.user);
     const { fromDate, toDate } = req.query;
     
     // 🔥 LEAN APPROACH: Use model static method with built-in caching
@@ -254,7 +259,7 @@ const getSiteVisitStats = async (req, res) => {
 const getSiteVisitsGroupedByCustomer = async (req, res) => {
   try {
     const startTime = Date.now();
-    const companyId = req.user.id;
+    const companyId = getEffectiveCompanyId(req.user);
     const { search, fromDate, toDate } = req.query;
 
     // 🔥 LEAN APPROACH: Use model static method with built-in caching
@@ -288,7 +293,7 @@ const updateSiteVisitStatus = async (req, res) => {
   try {
     const startTime = Date.now();
     const { status } = req.body;
-    const companyId = req.user.id;
+    const companyId = getEffectiveCompanyId(req.user);
 
     // 🔥 STATUS VALIDATION: Ensure valid status
     if (!['pending', 'invoiced', 'paid', 'converted'].includes(status)) {
@@ -328,3 +333,4 @@ module.exports = {
   getSiteVisitsGroupedByCustomer,
   updateSiteVisitStatus
 };
+

@@ -328,6 +328,16 @@ JobCostSchema.pre('save', function (next) {
 JobCostSchema.index({ documentId: 1, user: 1 }, { unique: true });
 
 /**
+ * CRITICAL PERFORMANCE INDEX: { _id: 1, user: 1 }
+ * 
+ * Purpose: Optimizes single document queries with user validation
+ * - Used by single JobCost fetch operations with user validation
+ * - Prevents slow queries when fetching JobCost by ID with user validation
+ * - Critical for API performance optimization
+ */
+JobCostSchema.index({ _id: 1, user: 1 });
+
+/**
  * DASHBOARD FILTERING PERFORMANCE INDEX
  * Compound Index: { user: 1, completed: 1, invoiceDate: -1 }
  * 
@@ -961,6 +971,7 @@ JobCostSchema.statics.getGlobalSystemStats = async function() {
 
         const dbTime = Date.now() - startTime;
         
+        // 🔥 NULL-SAFETY: Ensure all average fields default to 0 instead of null
         const stats = globalStats[0] || {
             totalJobCostProfit: 0,
             totalJobCostRevenue: 0,
@@ -973,6 +984,17 @@ JobCostSchema.statics.getGlobalSystemStats = async function() {
             avgJobCostRevenue: 0,
             avgProfitMargin: 0
         };
+        
+        // 🔥 NULL-SAFETY: Explicitly set null values to 0
+        if (stats.avgJobCostProfit === null || stats.avgJobCostProfit === undefined) {
+            stats.avgJobCostProfit = 0;
+        }
+        if (stats.avgJobCostRevenue === null || stats.avgJobCostRevenue === undefined) {
+            stats.avgJobCostRevenue = 0;
+        }
+        if (stats.avgProfitMargin === null || stats.avgProfitMargin === undefined) {
+            stats.avgProfitMargin = 0;
+        }
 
         return {
             stats,

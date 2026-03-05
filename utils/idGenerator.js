@@ -1,16 +1,19 @@
 const mongoose = require('mongoose');
 
 /**
- * Generate sequential ID for documents
+ * Generate sequential ID for documents with prefix-specific sequences
  * @param {Model} Model - Mongoose model
- * @param {String} prefix - Prefix for the ID (e.g., 'PO', 'QUO', 'INV')
+ * @param {String} prefix - Prefix for the ID (e.g., 'PO', 'BPO', 'QUO', 'INV')
  * @param {String} fieldName - Field name to search for max value
- * @returns {String} - Generated ID (e.g., 'PO-001', 'QUO-042')
+ * @returns {String} - Generated ID (e.g., 'PO-001', 'BPO-001', 'QUO-042')
  */
 const generateSequentialId = async (Model, prefix, fieldName = 'documentNumber') => {
     try {
-        // Find the document with the highest number
-        const lastDoc = await Model.findOne()
+        // 🔥 PREFIX-SPECIFIC SEQUENCE: Find documents with the same prefix only
+        // This ensures PO and BPO have separate sequences
+        const regex = new RegExp(`^${prefix}-\\d+$`);
+        
+        const lastDoc = await Model.findOne({ [fieldName]: regex })
             .sort({ [fieldName]: -1 })
             .select(fieldName)
             .lean();
@@ -18,7 +21,7 @@ const generateSequentialId = async (Model, prefix, fieldName = 'documentNumber')
         let nextNumber = 1;
 
         if (lastDoc && lastDoc[fieldName]) {
-            // Extract number from the field (e.g., 'PO-042' -> 42)
+            // Extract number from the field (e.g., 'PO-042' -> 42, 'BPO-005' -> 5)
             const match = lastDoc[fieldName].match(/\d+$/);
             if (match) {
                 nextNumber = parseInt(match[0]) + 1;

@@ -39,13 +39,19 @@ const protect = async (req, res, next) => {
             if (!req.user.id && req.user._id) {
                 req.user.id = req.user._id.toString();
             }
+            // Ensure effectiveCompanyId exists for cached users
+            if (!req.user.effectiveCompanyId) {
+                req.user.effectiveCompanyId = req.user.role === 'company' 
+                    ? req.user._id 
+                    : (req.user.companyId || req.user._id);
+            }
             console.log(`💾 Auth Cache Hit: ${Date.now() - startTime}ms (User: ${decoded.id})`.green);
             return next();
         }
 
         // 🔥 OPTIMIZATION: Use lean() and select only required fields for auth
         const user = await User.findById(decoded.id)
-            .select('_id name email role companyName')
+            .select('_id name email role companyName companyId')
             .lean();
 
         if (!user) {
@@ -54,6 +60,13 @@ const protect = async (req, res, next) => {
 
         // Add virtual id field for compatibility (since we're using lean())
         user.id = user._id.toString();
+
+        // 🔥 MULTI-USER FIX: Add effectiveCompanyId for data filtering
+        // - For company owners (role='company'): use their own _id
+        // - For admin users (role='admin'): use their companyId (parent company)
+        user.effectiveCompanyId = user.role === 'company' 
+            ? user._id 
+            : (user.companyId || user._id);
 
         // 🔥 OPTIMIZATION: Cache user data for subsequent requests
         userCache.set(cacheKey, {

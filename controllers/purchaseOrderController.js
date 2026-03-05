@@ -1,5 +1,7 @@
 const PurchaseOrder = require('../models/PurchaseOrder');
 const { successResponse, errorResponse } = require('../utils/responseHandler');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
+const path = require('path');
 const { 
     createSearchRegex, 
     createPaginationParams, 
@@ -50,7 +52,7 @@ const cleanupUploadedFile = (req, fieldName = 'po_image') => {
         
         // Also handle legacy req.file structure
         if (req.file && req.file.filename) {
-            const legacyPath = `uploads/invoices/${req.file.filename}`;
+            const legacyPath = `tile_uploads/invoices/${req.file.filename}`;
             deleteFile(legacyPath);
             console.log(`🗑️ Cleaned up legacy uploaded file: ${legacyPath}`.yellow);
         }
@@ -87,8 +89,8 @@ exports.getPurchaseOrders = async (req, res, next) => {
         const startTime = Date.now();
         const { page, limit, skip } = createPaginationParams(req.query, 15);
 
-        // Build query
-        const query = { user: req.user.id };
+        // Build query - 🔥 MULTI-USER FIX: Use effectiveCompanyId
+        const query = { user: getEffectiveCompanyId(req.user) };
 
         // Status filter
         if (req.query.status) {
@@ -121,8 +123,8 @@ exports.getPurchaseOrders = async (req, res, next) => {
         const [total, purchaseOrders] = await Promise.all([
             PurchaseOrder.countDocuments(query),
             PurchaseOrder.find(query)
-                .populate('supplier', 'name phone email')
-                .select('poId customerName orderDate status totalAmount supplier createdAt imagePath invoiceImagePath items')
+                .populate('supplier', 'name phone email address')
+                .select('poId quotationId customerName projectName orderDate status totalAmount supplier createdAt imagePath invoiceImagePath items sourceType materialSaleId')
                 .sort({ orderDate: -1 })
                 .skip(skip)
                 .limit(limit)
@@ -161,7 +163,7 @@ exports.getPurchaseOrder = async (req, res, next) => {
         
         const purchaseOrder = await PurchaseOrder.findOne({
             _id: req.params.id,
-            user: req.user.id,
+            user: getEffectiveCompanyId(req.user),
         }).populate('supplier');
 
         if (!purchaseOrder) {
@@ -192,11 +194,13 @@ exports.getPurchaseOrder = async (req, res, next) => {
 // @access  Private
 exports.createPurchaseOrder = async (req, res, next) => {
     console.log('API called: createPurchaseOrder for user:', req.user.id);
+    console.log('📦 Request body:', JSON.stringify(req.body, null, 2)); // DEBUG: Log request body
+    console.log('📦 Project Name:', req.body.projectName); // DEBUG: Log project name specifically
     try {
         const startTime = Date.now();
         
-        // Add user to req.body
-        req.body.user = req.user.id;
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data creation
+        req.body.user = getEffectiveCompanyId(req.user);
 
         // Add image data if uploaded
         addImageDataToPO(req.body, req.uploadData);
@@ -255,7 +259,7 @@ exports.updatePurchaseOrder = async (req, res, next) => {
         
         let purchaseOrder = await PurchaseOrder.findOne({
             _id: req.params.id,
-            user: req.user.id,
+            user: getEffectiveCompanyId(req.user),
         });
 
         if (!purchaseOrder) {
@@ -365,6 +369,39 @@ exports.updatePurchaseOrderStatus = async (req, res, next) => {
     }
 };
 
+// @desc    Cancel purchase order - Only allowed for 'Ordered' status
+// @route   PATCH /api/purchase-orders/:id/cancel
+// @access  Private
+exports.cancelPurchaseOrder = async (req, res, next) => {
+    console.log('API called: cancelPurchaseOrder for user:', req.user.id, 'PO ID:', req.params.id);
+    try {
+        const startTime = Date.now();
+        const { cancelReason } = req.body;
+
+        // Use model static method for cancellation
+        const purchaseOrder = await PurchaseOrder.cancelPurchaseOrder(
+            req.params.id,
+            req.user.id,
+            cancelReason || ''
+        );
+
+        const dbTime = Date.now() - startTime;
+        console.log(`✅ PO cancelled successfully in ${dbTime}ms`.green);
+
+        return createApiResponse(
+            res,
+            200,
+            'Purchase order cancelled successfully',
+            purchaseOrder,
+            null,
+            startTime
+        );
+    } catch (error) {
+        console.error('❌ Cancel purchase order error:', error);
+        return errorResponse(res, 400, error.message);
+    }
+};
+
 // @desc    Delete purchase order - LEAN with middleware handling cleanup and sync
 // @route   DELETE /api/purchase-orders/:id
 // @access  Private
@@ -376,7 +413,7 @@ exports.deletePurchaseOrder = async (req, res, next) => {
         // 🔥 MIDDLEWARE HANDLES: File cleanup, dashboard sync, JobCost cleanup
         const purchaseOrder = await PurchaseOrder.findOneAndDelete({
             _id: req.params.id,
-            user: req.user.id,
+            user: getEffectiveCompanyId(req.user),
         });
 
         if (!purchaseOrder) {
@@ -460,15 +497,20 @@ exports.uploadInvoiceImage = async (req, res, next) => {
         }
 
         console.log('File uploaded successfully:', req.file.filename, 'Size:', req.file.size);
+        console.log('Upload data:', req.uploadData);
 
-        // 🔥 UNIFIED LEGACY LOGIC: Use the newly created static method for consistency
+        // For now, just store the image temporarily with ObjectId filename
+        // It will be renamed to PO-based filename when delivery is confirmed
         const imageData = {
-            relativeFilePath: `uploads/invoices/${req.file.filename}`,
+            relativeFilePath: req.uploadData.invoice.relativeFilePath, // Keep original ObjectId-based path for now
             originalName: req.file.originalname,
-            generatedId: req.file.filename.split('.')[0] // Extract ID from filename
+            generatedId: req.uploadData.invoice.generatedId,
+            isTemporary: true // Flag to indicate this is temporary storage
         };
 
-        // 🔥 BULLETPROOF OPERATION: Use unified static method with built-in cleanup
+        console.log('Image data to save (temporary):', imageData);
+
+        // 🔥 BULLETPROOF OPERATION: Update the purchase order with temporary image data
         let purchaseOrder;
         try {
             purchaseOrder = await PurchaseOrder.updateInvoiceImage(
@@ -490,14 +532,76 @@ exports.uploadInvoiceImage = async (req, res, next) => {
 
         logPerformance('Upload Invoice Image', startTime, 1, req.params.id);
 
+        const invoiceImageUrl = getFileUrl(purchaseOrder.invoiceImagePath, req);
+        console.log('Generated invoice image URL:', invoiceImageUrl);
+
         return successResponse(res, 200, 'Invoice image uploaded successfully', {
             invoiceImagePath: purchaseOrder.invoiceImagePath,
-            invoiceImageUrl: getFileUrl(purchaseOrder.invoiceImagePath, req)
+            invoiceImageUrl: invoiceImageUrl
         });
     } catch (error) {
         // 🔥 BULLETPROOF CLEANUP: Final safety net
         console.error('❌ Unexpected error in uploadInvoiceImage:', error);
         cleanupUploadedFile(req, 'all');
+        next(error);
+    }
+};
+
+// @desc    Remove invoice image - NEW endpoint for removing uploaded invoices
+// @route   DELETE /api/purchase-orders/:id/invoice-image
+// @access  Private
+exports.removeInvoiceImage = async (req, res, next) => {
+    console.log('API called: removeInvoiceImage for user:', req.user.id, 'PO ID:', req.params.id);
+    try {
+        const startTime = Date.now();
+        
+        // Find the purchase order
+        const purchaseOrder = await PurchaseOrder.findOne({
+            _id: req.params.id,
+            user: getEffectiveCompanyId(req.user),
+        });
+
+        if (!purchaseOrder) {
+            return errorResponse(res, 404, 'Purchase order not found');
+        }
+
+        // Check if there's an invoice image to remove
+        if (!purchaseOrder.invoiceImagePath) {
+            return errorResponse(res, 400, 'No invoice image to remove');
+        }
+
+        // Delete the file from storage
+        const oldImagePath = purchaseOrder.invoiceImagePath;
+        const fileDeleted = deleteFile(oldImagePath);
+        
+        if (fileDeleted) {
+            console.log(`🗑️ Deleted invoice image: ${oldImagePath}`.yellow);
+        } else {
+            console.log(`⚠️ Could not delete invoice image file: ${oldImagePath}`.yellow);
+        }
+
+        // Update the purchase order to remove invoice image path
+        const updatedPurchaseOrder = await PurchaseOrder.findByIdAndUpdate(
+            req.params.id,
+            { 
+                $unset: { 
+                    invoiceImagePath: 1,
+                    invoiceImageId: 1,
+                    originalInvoiceImageName: 1
+                } 
+            },
+            { new: true, runValidators: true }
+        ).populate('supplier');
+
+        logPerformance('Remove Invoice Image', startTime, 1, req.params.id);
+
+        return successResponse(res, 200, 'Invoice image removed successfully', {
+            id: updatedPurchaseOrder._id,
+            invoiceImagePath: null,
+            invoiceImageUrl: null
+        });
+    } catch (error) {
+        console.error('❌ Error removing invoice image:', error);
         next(error);
     }
 };
@@ -515,16 +619,67 @@ exports.updateDeliveryVerification = async (req, res, next) => {
         const startTime = Date.now();
         const { deliveryItems } = req.body;
 
+        // First get the purchase order to check for temporary invoice image
+        const purchaseOrder = await PurchaseOrder.findOne({
+            _id: req.params.id,
+            user: getEffectiveCompanyId(req.user) });
+
+        if (!purchaseOrder) {
+            return errorResponse(res, 404, 'Purchase order not found');
+        }
+
+        // If there's a temporary invoice image, rename it to PO-based filename
+        if (purchaseOrder.invoiceImagePath) {
+            try {
+                const fs = require('fs');
+                const { BASE_STORAGE_PATH } = require('../middleware/upload');
+                
+                // Get current file path
+                const currentFilePath = path.join(BASE_STORAGE_PATH, purchaseOrder.invoiceImagePath);
+                
+                // Create new PO-based filename
+                const fileExtension = path.extname(purchaseOrder.invoiceImagePath).toLowerCase();
+                const poBasedFilename = `${purchaseOrder.poId}${fileExtension}`;
+                const companyId = purchaseOrder.user; // Use user ID as company ID
+                const newRelativeFilePath = `${companyId}/invoices/${poBasedFilename}`;
+                const newFilePath = path.join(BASE_STORAGE_PATH, newRelativeFilePath);
+
+                // Rename the file if it exists
+                if (fs.existsSync(currentFilePath)) {
+                    // Ensure the directory exists
+                    const newDir = path.dirname(newFilePath);
+                    if (!fs.existsSync(newDir)) {
+                        fs.mkdirSync(newDir, { recursive: true });
+                    }
+                    
+                    fs.renameSync(currentFilePath, newFilePath);
+                    console.log(`📝 Renamed invoice image from ${purchaseOrder.invoiceImagePath} to ${newRelativeFilePath}`);
+                    
+                    // Update the purchase order with new path
+                    purchaseOrder.invoiceImagePath = newRelativeFilePath;
+                }
+            } catch (renameError) {
+                console.error('❌ Failed to rename invoice image:', renameError);
+                // Continue with delivery verification even if rename fails
+            }
+        }
+
         // 🔥 LEAN APPROACH: Use model static method with built-in validation
-        const purchaseOrder = await PurchaseOrder.updateDeliveryVerification(
+        const updatedPurchaseOrder = await PurchaseOrder.updateDeliveryVerification(
             req.params.id,
             req.user.id,
             deliveryItems
         );
 
+        // If we renamed the file, make sure the updated PO has the correct path
+        if (purchaseOrder.invoiceImagePath !== updatedPurchaseOrder.invoiceImagePath) {
+            updatedPurchaseOrder.invoiceImagePath = purchaseOrder.invoiceImagePath;
+            await updatedPurchaseOrder.save();
+        }
+
         logPerformance('Update Delivery Verification', startTime, 1, req.params.id);
 
-        return successResponse(res, 200, 'Delivery verification updated successfully', purchaseOrder);
+        return successResponse(res, 200, 'Delivery verification updated successfully', updatedPurchaseOrder);
     } catch (error) {
         if (error.message.includes('not found')) {
             return errorResponse(res, 404, error.message);
@@ -543,12 +698,15 @@ module.exports = {
     createPurchaseOrder: exports.createPurchaseOrder,
     updatePurchaseOrder: exports.updatePurchaseOrder,
     updatePurchaseOrderStatus: exports.updatePurchaseOrderStatus,
+    cancelPurchaseOrder: exports.cancelPurchaseOrder,
     deletePurchaseOrder: exports.deletePurchaseOrder,
     
     // Image operations
     updatePurchaseOrderImage: exports.updatePurchaseOrderImage,
     uploadInvoiceImage: exports.uploadInvoiceImage,
+    removeInvoiceImage: exports.removeInvoiceImage, // NEW: Add remove invoice image
     
     // Delivery operations
     updateDeliveryVerification: exports.updateDeliveryVerification
 };
+

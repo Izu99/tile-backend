@@ -7,6 +7,7 @@ const {
     logPerformance,
     createApiResponse
 } = require('../utils/commonHelpers');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
 
 /**
  * 🔥 LEAN QUOTATION CONTROLLER
@@ -30,8 +31,8 @@ exports.getQuotations = async (req, res, next) => {
         const startTime = Date.now();
         const { page, limit, skip } = createPaginationParams(req.query);
 
-        // User based filter
-        const query = { user: req.user._id || req.user.id };
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const query = { user: getEffectiveCompanyId(req.user) };
 
         if (req.query.type) query.type = req.query.type;
         if (req.query.status) query.status = req.query.status;
@@ -95,8 +96,8 @@ exports.createQuotation = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
-        // Set required fields
-        req.body.user = req.user.id;
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data creation
+        req.body.user = getEffectiveCompanyId(req.user);
         req.body.type = 'quotation';
         req.body.status = 'pending';
 
@@ -125,10 +126,11 @@ exports.convertToInvoice = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data access
         // 🔥 DATA INTEGRITY: Use transaction-based static method
         const invoice = await QuotationDocument.convertToInvoice(
             req.params.id, 
-            req.user.id, 
+            getEffectiveCompanyId(req.user), 
             {
                 customDueDate: req.body.customDueDate,
                 payments: req.body.payments || []
@@ -160,10 +162,11 @@ exports.addPayment = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data access
         // 🔥 LEAN APPROACH: Use model static method with automatic status calculation
         const updatedDoc = await QuotationDocument.addPayment(
             req.params.id,
-            req.user.id,
+            getEffectiveCompanyId(req.user),
             req.body
         );
 
@@ -191,7 +194,7 @@ exports.updateStatus = async (req, res, next) => {
         // 🔥 SAFE OPTION: Use find + save pattern for reliable middleware execution
         const doc = await QuotationDocument.findOne({
             _id: req.params.id,
-            user: req.user.id
+            user: getEffectiveCompanyId(req.user)
         });
 
         if (!doc) {
@@ -221,7 +224,7 @@ exports.getQuotation = async (req, res, next) => {
         
         const doc = await QuotationDocument.findOne({
             _id: req.params.id,
-            user: req.user.id
+            user: getEffectiveCompanyId(req.user)
         });
 
         if (!doc) return errorResponse(res, 404, 'Document not found');
@@ -258,7 +261,7 @@ exports.updateQuotation = async (req, res, next) => {
         
         // 🔥 MIDDLEWARE HANDLES: JobCost sync automatically if status is 'approved'
         const doc = await QuotationDocument.findOneAndUpdate(
-            { _id: quotationId, user: req.user.id },
+            { _id: quotationId, user: getEffectiveCompanyId(req.user) },
             req.body,
             { new: true, runValidators: true }
         );
@@ -284,10 +287,11 @@ exports.deleteQuotation = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data deletion
         // 🔥 MIDDLEWARE HANDLES: Dashboard counter decrement automatically
         const doc = await QuotationDocument.findOneAndDelete({
             _id: req.params.id,
-            user: req.user.id
+            user: getEffectiveCompanyId(req.user)
         });
 
         if (!doc) return errorResponse(res, 404, 'Document not found');

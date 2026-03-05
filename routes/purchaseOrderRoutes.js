@@ -10,8 +10,10 @@ const {
     createPurchaseOrder,
     updatePurchaseOrder,
     updatePurchaseOrderStatus,
+    cancelPurchaseOrder,
     deletePurchaseOrder,
     uploadInvoiceImage,
+    removeInvoiceImage, // NEW: Add remove invoice image import
     updateDeliveryVerification,
 } = require('../controllers/purchaseOrderController');
 
@@ -34,8 +36,12 @@ router.route('/:id')
 
 router.patch('/:id/status', protect, updatePurchaseOrderStatus);
 
+router.patch('/:id/cancel', protect, cancelPurchaseOrder);
+
 router.put('/:id/delivery-verification', protect, updateDeliveryVerification);
 
 router.post('/:id/invoice-image', protect, ...upload.single('invoice'), uploadInvoiceImage);
+
+router.delete('/:id/invoice-image', protect, removeInvoiceImage); // NEW: Add remove invoice image route
 
 module.exports = router;

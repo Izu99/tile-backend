@@ -48,13 +48,65 @@ exports.getItemConfigs = async (req, res) => {
 // @route   GET /api/super-admin/dashboard/stats
 // @access  Private/SuperAdmin
 exports.getDashboardStats = async (req, res) => {
+    const startTime = Date.now();
+    console.log('');
+    console.log('═══════════════════════════════════════════════════════════');
+    console.log('🚀 GET DASHBOARD STATS START:', new Date().toISOString());
+    console.log('═══════════════════════════════════════════════════════════');
+    
     try {
+        console.log('📤 Step 1: Request received');
+        console.log(`⏱️  Time: ${Date.now() - startTime}ms`);
+        console.log(`👤 User: ${req.user?.email || 'Unknown'}`);
+        console.log(`🔑 User ID: ${req.user?._id || 'Unknown'}`);
+        console.log(`🏢 Company ID: ${req.user?.companyId || 'N/A (Super Admin)'}`);
+        
+        console.log('');
+        console.log('📡 Step 2: Calling CacheService.getGlobalSystemStats()...');
+        const cacheStartTime = Date.now();
+        
         // 🔥 SKINNY CONTROLLER: Delegate to CacheService
         const data = await CacheService.getGlobalSystemStats();
         
-        return createApiResponse(res, 200, 'Dashboard stats retrieved successfully', data);
+        const cacheDuration = Date.now() - cacheStartTime;
+        console.log(`✅ Step 2 Complete: Cache service responded in ${cacheDuration}ms`);
+        console.log(`📊 Data keys: ${Object.keys(data).join(', ')}`);
+        console.log(`📈 Stats: Companies=${data.totalCompanies}, Categories=${data.totalCategories}`);
+        
+        console.log('');
+        console.log('📤 Step 3: Sending response...');
+        const responseStartTime = Date.now();
+        
+        const response = createApiResponse(res, 200, 'Dashboard stats retrieved successfully', data);
+        
+        const responseDuration = Date.now() - responseStartTime;
+        const totalDuration = Date.now() - startTime;
+        
+        console.log(`✅ Step 3 Complete: Response sent in ${responseDuration}ms`);
+        console.log('');
+        console.log('═══════════════════════════════════════════════════════════');
+        console.log('✅ GET DASHBOARD STATS SUCCESS');
+        console.log(`⏱️  Total Time: ${totalDuration}ms`);
+        console.log(`   - Cache Service: ${cacheDuration}ms`);
+        console.log(`   - Response: ${responseDuration}ms`);
+        console.log('═══════════════════════════════════════════════════════════');
+        console.log('');
+        
+        return response;
     } catch (error) {
-        console.error('❌ getDashboardStats error:', error);
+        const totalDuration = Date.now() - startTime;
+        
+        console.log('');
+        console.log('═══════════════════════════════════════════════════════════');
+        console.log('💥 GET DASHBOARD STATS FAILED');
+        console.log(`⏱️  Failed after: ${totalDuration}ms`);
+        console.log(`❌ Error Type: ${error.constructor.name}`);
+        console.log(`❌ Error Message: ${error.message}`);
+        console.log('📍 Stack Trace:');
+        console.error(error.stack);
+        console.log('═══════════════════════════════════════════════════════════');
+        console.log('');
+        
         return createApiResponse(res, 500, error.message);
     }
 };
@@ -755,6 +807,220 @@ exports.getCacheStats = async (req, res) => {
     }
 };
 
+// @desc    Get all users for a specific company
+// @route   GET /api/super-admin/companies/:companyId/users
+// @access  Private/SuperAdmin
+exports.getCompanyUsers = async (req, res) => {
+    try {
+        const { companyId } = req.params;
+
+        // Validate companyId
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return createApiResponse(res, 400, 'Invalid company ID');
+        }
+
+        // Find the main company user and any additional users created for this company
+        // In this system, the company user IS the company, so we look for:
+        // 1. The main company user (role: 'company')
+        // 2. Any admin users created for this company (role: 'admin' with companyId reference)
+        const users = await User.find({ 
+            $or: [
+                { _id: companyId, role: 'company' }, // Main company user
+                { companyId: companyId, role: 'admin' } // Additional admin users
+            ]
+        }).select('-password').sort({ createdAt: -1 });
+
+        return createApiResponse(res, 200, 'Company users retrieved successfully', users);
+    } catch (error) {
+        console.error('Error getting company users:', error);
+        return createApiResponse(res, 500, error.message);
+    }
+};
+
+// @desc    Create a new user for a specific company
+// @route   POST /api/super-admin/companies/:companyId/users
+// @access  Private/SuperAdmin
+exports.createCompanyUser = async (req, res) => {
+    try {
+        const { companyId } = req.params;
+        const { name, email, password } = req.body;
+
+        // Validate companyId
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            return createApiResponse(res, 400, 'Invalid company ID');
+        }
+
+        // Validate required fields
+        if (!name || !email || !password) {
+            return createApiResponse(res, 400, 'Name, email, and password are required');
+        }
+
+        // Check if user with this email already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return createApiResponse(res, 400, 'User with this email already exists');
+        }
+
+        // Get the main company user to copy company details
+        const mainCompanyUser = await User.findById(companyId);
+        if (!mainCompanyUser || mainCompanyUser.role !== 'company') {
+            return createApiResponse(res, 400, 'Company not found');
+        }
+
+        // Create new admin user with company details
+        const user = await User.create({
+            name,
+            email,
+            password, // Will be hashed by the User model pre-save middleware
+            role: 'admin',
+            companyId: companyId, // Reference to the main company
+            companyName: mainCompanyUser.companyName,
+            companyAddress: mainCompanyUser.companyAddress,
+            companyPhone: mainCompanyUser.companyPhone,
+            isActive: true,
+            mustChangePassword: false
+        });
+
+        // Remove password from response
+        const userResponse = user.toObject();
+        delete userResponse.password;
+
+        // Log activity
+        await ActivityLog.create({
+            performedBy: req.user.id,
+            action: 'CREATE_COMPANY_USER',
+            description: `Created user ${name} (${email}) for company ${companyId}`,
+            targetId: user._id,
+            targetType: 'User',
+            metadata: {
+                companyId: companyId,
+                userEmail: email,
+                userName: name
+            }
+        });
+
+        return createApiResponse(res, 201, 'Company user created successfully', userResponse);
+    } catch (error) {
+        console.error('Error creating company user:', error);
+        return createApiResponse(res, 500, error.message);
+    }
+};
+
+// @desc    Update a company user
+// @route   PUT /api/super-admin/users/:userId
+// @access  Private/SuperAdmin
+exports.updateCompanyUser = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { name, email, password } = req.body;
+
+        // Validate userId
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return createApiResponse(res, 400, 'Invalid user ID');
+        }
+
+        // Find the user
+        const user = await User.findById(userId);
+        if (!user) {
+            return createApiResponse(res, 404, 'User not found');
+        }
+
+        // Prevent updating super-admin users
+        if (user.role === 'super-admin') {
+            return createApiResponse(res, 403, 'Cannot update super-admin users');
+        }
+
+        // Check if email is being changed and if it's already taken
+        if (email && email !== user.email) {
+            const existingUser = await User.findOne({ email });
+            if (existingUser) {
+                return createApiResponse(res, 400, 'User with this email already exists');
+            }
+            user.email = email;
+        }
+
+        // Update fields
+        if (name) user.name = name;
+        
+        // Only update password if provided
+        if (password && password.trim() !== '') {
+            user.password = password; // Will be hashed by the User model pre-save middleware
+        }
+
+        await user.save();
+
+        // Remove password from response
+        const userResponse = user.toObject();
+        delete userResponse.password;
+
+        // Log activity
+        await ActivityLog.create({
+            performedBy: req.user.id,
+            action: 'UPDATE_COMPANY_USER',
+            description: `Updated user ${user.name} (${user.email})`,
+            targetId: userId,
+            targetType: 'User',
+            metadata: {
+                userName: user.name,
+                userEmail: user.email,
+                userRole: user.role
+            }
+        });
+
+        return createApiResponse(res, 200, 'Company user updated successfully', userResponse);
+    } catch (error) {
+        console.error('Error updating company user:', error);
+        return createApiResponse(res, 500, error.message);
+    }
+};
+
+// @desc    Delete a company user
+// @route   DELETE /api/super-admin/users/:userId
+// @access  Private/SuperAdmin
+exports.deleteCompanyUser = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Validate userId
+        if (!mongoose.Types.ObjectId.isValid(userId)) {
+            return createApiResponse(res, 400, 'Invalid user ID');
+        }
+
+        // Find the user
+        const user = await User.findById(userId);
+        if (!user) {
+            return createApiResponse(res, 404, 'User not found');
+        }
+
+        // Prevent deletion of super-admin users
+        if (user.role === 'super-admin') {
+            return createApiResponse(res, 403, 'Cannot delete super-admin users');
+        }
+
+        // Delete the user
+        await User.findByIdAndDelete(userId);
+
+        // Log activity
+        await ActivityLog.create({
+            performedBy: req.user.id,
+            action: 'DELETE_COMPANY_USER',
+            description: `Deleted user ${user.name} (${user.email})`,
+            targetId: userId,
+            targetType: 'User',
+            metadata: {
+                userName: user.name,
+                userEmail: user.email,
+                userRole: user.role
+            }
+        });
+
+        return createApiResponse(res, 200, 'Company user deleted successfully');
+    } catch (error) {
+        console.error('Error deleting company user:', error);
+        return createApiResponse(res, 500, error.message);
+    }
+};
+
 module.exports = {
     getItemConfigs: exports.getItemConfigs,
     getDashboardStats: exports.getDashboardStats,
@@ -770,5 +1036,9 @@ module.exports = {
     addItemToCategory: exports.addItemToCategory,
     updateItem: exports.updateItem,
     deleteItem: exports.deleteItem,
-    getCacheStats: exports.getCacheStats
+    getCacheStats: exports.getCacheStats,
+    getCompanyUsers: exports.getCompanyUsers,
+    createCompanyUser: exports.createCompanyUser,
+    updateCompanyUser: exports.updateCompanyUser,
+    deleteCompanyUser: exports.deleteCompanyUser
 };

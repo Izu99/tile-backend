@@ -1,6 +1,7 @@
 const Supplier = require('../models/Supplier');
 const { errorResponse } = require('../utils/responseHandler');
 const { createApiResponse } = require('../utils/commonHelpers');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
 
 // Import cache clearing function from Dashboard Controller
 const { clearCompanyDashboardCache } = require('./dashboardController');
@@ -83,9 +84,10 @@ exports.createSupplier = async (req, res, next) => {
         const startTime = Date.now();
         
         // Use model's atomic creation method
+        const companyId = getEffectiveCompanyId(req.user);
         const supplier = await Supplier.createSupplierAtomic(
-            { ...req.body, user: req.user.id },
-            () => clearCompanyDashboardCache(req.user.id)
+            { ...req.body, user: companyId },
+            () => clearCompanyDashboardCache(companyId)
         );
 
         return createApiResponse(

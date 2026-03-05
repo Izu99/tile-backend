@@ -103,17 +103,17 @@ if (process.env.NODE_ENV === 'development') {
     app.use(morgan('dev'));
 }
 
-// Static folder for uploads - serving from uploads_storage directory (outside project)
+// Static folder for uploads - serving from tile_uploads directory (inside project)
 const path = require('path');
-const uploadsStoragePath = path.resolve(__dirname, '..', '..', 'uploads_storage');
+const BASE_STORAGE_PATH = path.resolve(__dirname, '..', 'tile_uploads');
 
 // 🔍 VERIFICATION: Log the resolved upload directory path
 console.log('📁 Upload Storage Configuration:'.cyan);
-console.log(`   Resolved Path: ${uploadsStoragePath}`.cyan);
-console.log(`   Directory Exists: ${require('fs').existsSync(uploadsStoragePath)}`.cyan);
-console.log(`   Virtual Path: /uploads`.cyan);
+console.log(`   Resolved Path: ${BASE_STORAGE_PATH}`.cyan);
+console.log(`   Directory Exists: ${require('fs').existsSync(BASE_STORAGE_PATH)}`.cyan);
+console.log(`   Virtual Path: /tile_uploads`.cyan);
 
-app.use('/uploads', express.static(uploadsStoragePath));
+app.use('/tile_uploads', express.static(BASE_STORAGE_PATH));
 
 // API Routes
 app.use('/api/auth', require('./routes/authRoutes'));

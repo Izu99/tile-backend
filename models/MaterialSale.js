@@ -111,7 +111,7 @@ const MaterialSaleSchema = new mongoose.Schema(
         invoiceNumber: {
             type: String,
             required: true,
-            unique: true,
+            // Note: unique: true removed - using compound unique index { user: 1, invoiceNumber: 1 } for multi-tenant setup
         },
         saleDate: {
             type: Date,
@@ -477,15 +477,29 @@ MaterialSaleSchema.statics.getOptimizedList = async function(userId, options = {
   const [total, materialSales] = await Promise.all([
     this.countDocuments(query),
     this.find(query)
-      .select('invoiceNumber customerName saleDate status paymentTerms dueDate createdAt')
+      // 🔥 CRITICAL FIX: Return ALL fields including items, paymentHistory, customer details
+      // Previously .select() was stripping out items array and other critical data
+      // This caused expansion tiles and details screen to show empty data
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .lean({ virtuals: true }) // 🔥 LEAN VIRTUALS: Memory optimization + virtual fields
+      .lean({ virtuals: true }) // 🔥 LEAN VIRTUALS: Memory optimization + virtual fields (totalAmount, amountDue, etc.)
   ]);
 
   const totalPages = Math.ceil(total / parseInt(limit));
   const hasMore = parseInt(page) < totalPages;
+
+  // 🔥 DEBUG: Log response size and data completeness
+  console.log(`📊 Material Sales Response Stats:`.cyan);
+  console.log(`   - Total records: ${total}`.cyan);
+  console.log(`   - Returned: ${materialSales.length} sales`.cyan);
+  console.log(`   - Page ${parseInt(page)}/${totalPages}`.cyan);
+  if (materialSales.length > 0) {
+    const firstSale = materialSales[0];
+    console.log(`   - Sample sale has items: ${firstSale.items?.length || 0}`.cyan);
+    console.log(`   - Sample sale has payments: ${firstSale.paymentHistory?.length || 0}`.cyan);
+    console.log(`   - Sample sale totalAmount: ${firstSale.totalAmount || 0}`.cyan);
+  }
 
   return {
     materialSales: materialSales || [],
@@ -664,6 +678,7 @@ MaterialSaleSchema.statics.getGlobalSystemStats = async function() {
 
         const dbTime = Date.now() - startTime;
         
+        // 🔥 NULL-SAFETY: Ensure all average fields default to 0 instead of null
         const stats = globalStats[0] || {
             totalMaterialSalesRevenue: 0,
             totalMaterialSalesProfit: 0,
@@ -675,6 +690,14 @@ MaterialSaleSchema.statics.getGlobalSystemStats = async function() {
             avgSaleAmount: 0,
             avgProfitMargin: 0
         };
+        
+        // 🔥 NULL-SAFETY: Explicitly set null values to 0
+        if (stats.avgSaleAmount === null || stats.avgSaleAmount === undefined) {
+            stats.avgSaleAmount = 0;
+        }
+        if (stats.avgProfitMargin === null || stats.avgProfitMargin === undefined) {
+            stats.avgProfitMargin = 0;
+        }
 
         return {
             stats,

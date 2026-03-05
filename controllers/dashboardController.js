@@ -4,6 +4,7 @@ const JobCost = require('../models/JobCost');
 const PurchaseOrder = require('../models/PurchaseOrder');
 const User = require('../models/User');
 const { successResponse } = require('../utils/responseHandler');
+const { getEffectiveCompanyId } = require('../utils/companyHelper');
 const mongoose = require('mongoose');
 const NodeCache = require('node-cache');
 require('colors');
@@ -248,14 +249,17 @@ exports.getDashboardStats = async (req, res, next) => {
     try {
         const startTime = Date.now();
         const period = req.query.period || 'last30days';
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
         const userId = req.user.id;
         
-        // 🔥 IN-MEMORY CACHING: Check cache first
-        const cacheKey = createCacheKey(userId, `stats:${period}`);
+        // 🔥 IN-MEMORY CACHING: Check cache first (use companyId for cache key)
+        const cacheKey = createCacheKey(companyId.toString(), `stats:${period}`);
         const cachedData = dashboardCache.get(cacheKey);
         
         if (cachedData) {
-            console.log(`💾 Stats Cache Hit: ${period} for user ${userId} (0ms)`.green);
+            console.log(`💾 Stats Cache Hit: ${period} for company ${companyId} (0ms)`.green);
             return successResponse(res, 200, 'Dashboard stats retrieved successfully (cached)', {
                 ...cachedData,
                 _performance: {
@@ -267,14 +271,13 @@ exports.getDashboardStats = async (req, res, next) => {
         }
 
         const { start, end } = getDateRange(period);
-        const userObjectId = new mongoose.Types.ObjectId(userId);
 
         // 🔥 SKINNY CONTROLLER PATTERN: Use model static methods with Promise.all
         const [quotationStats, materialSaleStats, jobCostStats, purchaseOrderStats] = await Promise.all([
-            QuotationDocument.getDashboardStats(userObjectId, start, end),
-            MaterialSale.getDashboardStats(userObjectId, start, end),
-            JobCost.getDashboardStats(userObjectId, start, end),
-            PurchaseOrder.getDashboardStats(userObjectId, start, end)
+            QuotationDocument.getDashboardStats(companyId, start, end),
+            MaterialSale.getDashboardStats(companyId, start, end),
+            JobCost.getDashboardStats(companyId, start, end),
+            PurchaseOrder.getDashboardStats(companyId, start, end)
         ]);
 
         const dbTime = Date.now() - startTime;
@@ -326,7 +329,7 @@ exports.getDashboardStats = async (req, res, next) => {
 
         // 🔥 IN-MEMORY CACHING: Store in cache
         dashboardCache.set(cacheKey, stats);
-        console.log(`💾 Stats Cached: ${period} for user ${userId}`.green);
+        console.log(`💾 Stats Cached: ${period} for company ${companyId}`.green);
 
         console.log(`⚡ Dashboard Stats: ${dbTime}ms (skinny controller pattern)`.cyan);
 
@@ -345,10 +348,12 @@ exports.getRevenueTrend = async (req, res, next) => {
         const startTime = Date.now();
         const period = req.query.period || 'last30days';
         const { start, end } = getDateRange(period);
-        const userId = new mongoose.Types.ObjectId(req.user.id);
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
 
         // 🔥 OPTIMIZED: Use private helper function
-        const chartData = await _getRevenueTrend(userId, start, end);
+        const chartData = await _getRevenueTrend(companyId, start, end);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Revenue Trend: ${dbTime}ms (optimized date grouping)`.cyan);
@@ -374,10 +379,12 @@ exports.getProfitBreakdown = async (req, res, next) => {
         const startTime = Date.now();
         const period = req.query.period || 'last30days';
         const { start, end } = getDateRange(period);
-        const userId = new mongoose.Types.ObjectId(req.user.id);
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
 
         // 🔥 OPTIMIZED: Use private helper function
-        const chartData = await _getProfitBreakdown(userId, start, end);
+        const chartData = await _getProfitBreakdown(companyId, start, end);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Profit Breakdown: ${dbTime}ms (parallel aggregation)`.cyan);
@@ -401,10 +408,12 @@ exports.getProfitBreakdown = async (req, res, next) => {
 exports.getActionableItems = async (req, res, next) => {
     try {
         const startTime = Date.now();
-        const userId = new mongoose.Types.ObjectId(req.user.id);
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
 
         // 🔥 OPTIMIZED: Use private helper function
-        const actionableItems = await _getActionableItems(userId);
+        const actionableItems = await _getActionableItems(companyId);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Actionable Items: ${dbTime}ms (lean queries)`.cyan);
@@ -429,14 +438,17 @@ exports.getCombinedDashboardData = async (req, res, next) => {
     try {
         const startTime = Date.now();
         const period = req.query.period || 'last30days';
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
         const userId = req.user.id;
         
-        // 🔥 IN-MEMORY CACHING: Check cache first
-        const cacheKey = createCacheKey(userId, period);
+        // 🔥 IN-MEMORY CACHING: Check cache first (use companyId for cache key)
+        const cacheKey = createCacheKey(companyId.toString(), period);
         const cachedData = dashboardCache.get(cacheKey);
         
         if (cachedData) {
-            console.log(`💾 Dashboard Cache Hit: ${period} for user ${userId} (0ms)`.green);
+            console.log(`💾 Dashboard Cache Hit: ${period} for company ${companyId} (0ms)`.green);
             return successResponse(res, 200, 'Combined dashboard data retrieved successfully (cached)', {
                 ...cachedData,
                 _performance: {
@@ -448,10 +460,9 @@ exports.getCombinedDashboardData = async (req, res, next) => {
         }
 
         // Cache miss - fetch data
-        console.log(`🔄 Dashboard Cache Miss: ${period} for user ${userId}`.cyan);
+        console.log(`🔄 Dashboard Cache Miss: ${period} for company ${companyId}`.cyan);
         
         const { start, end } = getDateRange(period);
-        const userObjectId = new mongoose.Types.ObjectId(userId);
         
         // 🔥 COMPUTED FIELDS INTEGRATION: Get user data with computed fields
         const userData = await User.findById(userId)
@@ -466,13 +477,13 @@ exports.getCombinedDashboardData = async (req, res, next) => {
 
         // 🔥 SKINNY CONTROLLER PATTERN: Use model static methods with Promise.all
         const [quotationStats, materialSaleStats, jobCostStats, purchaseOrderStats, revenueTrend, profitBreakdown, actionableItems] = await Promise.all([
-            QuotationDocument.getDashboardStats(userObjectId, start, end),
-            MaterialSale.getDashboardStats(userObjectId, start, end),
-            JobCost.getDashboardStats(userObjectId, start, end),
-            PurchaseOrder.getDashboardStats(userObjectId, start, end),
-            _getRevenueTrend(userObjectId, start, end),
-            _getProfitBreakdown(userObjectId, start, end),
-            _getActionableItems(userObjectId)
+            QuotationDocument.getDashboardStats(companyId, start, end),
+            MaterialSale.getDashboardStats(companyId, start, end),
+            JobCost.getDashboardStats(companyId, start, end),
+            PurchaseOrder.getDashboardStats(companyId, start, end),
+            _getRevenueTrend(companyId, start, end),
+            _getProfitBreakdown(companyId, start, end),
+            _getActionableItems(companyId)
         ]);
 
         const dbTime = Date.now() - startTime;
