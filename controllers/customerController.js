@@ -25,8 +25,11 @@ exports.searchCustomer = async (req, res, next) => {
             return errorResponse(res, 400, 'Phone number is required');
         }
 
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
+        
         // 🔥 LEAN APPROACH: Use model static method for business logic
-        const customer = await Customer.searchByPhone(phone, req.user.id);
+        const customer = await Customer.searchByPhone(phone, companyId);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Customer Search: ${dbTime}ms (phone: ${phone})`.cyan);
@@ -79,10 +82,12 @@ exports.createCustomer = async (req, res, next) => {
 exports.getCustomers = async (req, res, next) => {
     try {
         const startTime = Date.now();
-        const userId = req.user.id;
+        
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
         
         // 🔥 SKINNY CONTROLLER: Use model static method for all query logic
-        const result = await Customer.getOptimizedList(userId, req.query);
+        const result = await Customer.getOptimizedList(companyId, req.query);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Customers Query: ${dbTime}ms (${result.customers.length}/${result.pagination.total} customers, page ${result.pagination.page})`.cyan);
@@ -119,8 +124,11 @@ exports.updateCustomer = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
+        
         // 🔥 ATOMIC OPERATION: Use model static method for atomic update
-        const customer = await Customer.updateCustomerAtomic(req.params.id, req.user.id, req.body);
+        const customer = await Customer.updateCustomerAtomic(req.params.id, companyId, req.body);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Customer Update: ${dbTime}ms (ID: ${req.params.id})`.cyan);
@@ -148,8 +156,11 @@ exports.deleteCustomer = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
+        
         // 🔥 ATOMIC OPERATION: Use model static method for atomic deletion
-        await Customer.deleteCustomerAtomic(req.params.id, req.user.id);
+        await Customer.deleteCustomerAtomic(req.params.id, companyId);
 
         const dbTime = Date.now() - startTime;
         console.log(`⚡ Customer Delete: ${dbTime}ms (ID: ${req.params.id})`.cyan);

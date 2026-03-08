@@ -23,6 +23,9 @@ exports.getSuppliers = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
+        
         // Parse query parameters
         const options = {
             page: parseInt(req.query.page, 10) || 1,
@@ -32,7 +35,7 @@ exports.getSuppliers = async (req, res, next) => {
         };
 
         // Use model's optimized static method
-        const result = await Supplier.getSuppliersOptimized(req.user.id, options);
+        const result = await Supplier.getSuppliersOptimized(companyId, options);
 
         return createApiResponse(
             res,
@@ -55,8 +58,11 @@ exports.getSupplier = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
+        
         // Use model's static method for secure retrieval
-        const supplier = await Supplier.getSupplierByIdSecure(req.params.id, req.user.id);
+        const supplier = await Supplier.getSupplierByIdSecure(req.params.id, companyId);
 
         if (!supplier) {
             return errorResponse(res, 404, 'Supplier not found');
@@ -120,10 +126,13 @@ exports.updateSupplier = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
+        
         // Use model's atomic update method
         const updatedSupplier = await Supplier.updateSupplierAtomic(
             req.params.id,
-            req.user.id,
+            companyId,
             req.body
         );
 
@@ -152,11 +161,14 @@ exports.deleteSupplier = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
+        // 🔥 MULTI-USER FIX: Use effectiveCompanyId for data filtering
+        const companyId = getEffectiveCompanyId(req.user);
+        
         // Use model's atomic deletion method
         const deletedSupplier = await Supplier.deleteSupplierAtomic(
             req.params.id,
-            req.user.id,
-            () => clearCompanyDashboardCache(req.user.id)
+            companyId,
+            () => clearCompanyDashboardCache(companyId)
         );
 
         if (!deletedSupplier) {
