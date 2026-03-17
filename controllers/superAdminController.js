@@ -8,7 +8,7 @@ const { createApiResponse } = require('../utils/commonHelpers');
 // Unit configurations
 const UNIT_CONFIGS = {
     service_units: ['sqft', 'ft', 'Job', 'Visit', 'Day'],
-    product_units: ['sqft', 'ft', 'pcs', 'kg', 'm']
+    product_units: ['sqft', 'ft', 'pcs', 'kg', 'm', 'L', 'ml']
 };
 
 /**
