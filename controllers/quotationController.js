@@ -36,6 +36,17 @@ exports.getQuotations = async (req, res, next) => {
 
         if (req.query.type) query.type = req.query.type;
         if (req.query.status) query.status = req.query.status;
+
+        // 🔥 DATE FILTER: Filter by invoiceDate range
+        if (req.query.startDate || req.query.endDate) {
+            query.invoiceDate = {};
+            if (req.query.startDate) {
+                query.invoiceDate.$gte = new Date(req.query.startDate + 'T00:00:00.000Z');
+            }
+            if (req.query.endDate) {
+                query.invoiceDate.$lte = new Date(req.query.endDate + 'T23:59:59.999Z');
+            }
+        }
         
         // 🔥 OPTIMIZATION: Pre-compiled regex for search
         if (req.query.search) {
@@ -49,15 +60,37 @@ exports.getQuotations = async (req, res, next) => {
             }
         }
 
+        // 🔥 SORT: Dynamic sort based on query param
+        let sortObj = { createdAt: -1 }; // default: newest first
+        if (req.query.sort) {
+            switch (req.query.sort) {
+                case 'oldest':
+                    sortObj = { createdAt: 1 };
+                    break;
+                case 'invoice_asc':
+                    // Numeric sort on documentNumber string (cast to int)
+                    sortObj = { documentNumber: 1 };
+                    break;
+                case 'invoice_desc':
+                    sortObj = { documentNumber: -1 };
+                    break;
+                case 'newest':
+                default:
+                    sortObj = { createdAt: -1 };
+                    break;
+            }
+        }
+
         // 🔥 OPTIMIZATION: Parallel execution with lean() + virtuals + select() + pagination
         const [total, documents] = await Promise.all([
-            QuotationDocument.countDocuments(query),
+            QuotationDocument.countDocuments(query).maxTimeMS(5000),
             QuotationDocument.find(query)
                 .select('documentNumber type status customerName customerPhone customerAddress projectTitle totalAmount dueDate invoiceDate createdAt lineItems paymentHistory')
-                .sort({ createdAt: -1 })
+                .sort(sortObj)
                 .skip(skip)
                 .limit(limit)
-                .lean({ virtuals: true }) // 🔥 LEAN VIRTUALS: Enables displayDocumentNumber and other virtuals
+                .maxTimeMS(5000)
+                .lean({ virtuals: true })
         ]);
 
         // 🔥 VIRTUALS SUPPORT: Add necessary virtuals manually for enhanced lean response

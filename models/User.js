@@ -610,7 +610,7 @@ UserSchema.methods.getSignedJwtToken = function () {
         {
             id: this._id,
             role: this.role,
-            companyId: this._id,
+            companyId: (this.role === 'admin' && this.companyId) ? this.companyId : this._id,
             email: this.email,
             isActive: this.isActive,
             companyName: this.companyName || ''

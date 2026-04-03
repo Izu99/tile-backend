@@ -450,7 +450,8 @@ MaterialSaleSchema.statics.getOptimizedList = async function(userId, options = {
     search, 
     status, 
     startDate, 
-    endDate 
+    endDate,
+    sort
   } = options;
 
   let query = { user: new mongoose.Types.ObjectId(userId) };
@@ -472,6 +473,26 @@ MaterialSaleSchema.statics.getOptimizedList = async function(userId, options = {
     if (endDate) query.saleDate.$lte = new Date(endDate);
   }
 
+  // Sort Mapping
+  let sortObj = { createdAt: -1 }; // default newest
+  if (sort) {
+    switch (sort) {
+      case 'oldest':
+        sortObj = { createdAt: 1 };
+        break;
+      case 'invoice_asc':
+        sortObj = { invoiceNumber: 1 };
+        break;
+      case 'invoice_desc':
+        sortObj = { invoiceNumber: -1 };
+        break;
+      case 'newest':
+      default:
+        sortObj = { createdAt: -1 };
+        break;
+    }
+  }
+
   // Execute optimized queries in parallel with lean() for memory efficiency
   const skip = (parseInt(page) - 1) * parseInt(limit);
   const [total, materialSales] = await Promise.all([
@@ -480,7 +501,7 @@ MaterialSaleSchema.statics.getOptimizedList = async function(userId, options = {
       // 🔥 CRITICAL FIX: Return ALL fields including items, paymentHistory, customer details
       // Previously .select() was stripping out items array and other critical data
       // This caused expansion tiles and details screen to show empty data
-      .sort({ createdAt: -1 })
+      .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
       .lean({ virtuals: true }) // 🔥 LEAN VIRTUALS: Memory optimization + virtual fields (totalAmount, amountDue, etc.)

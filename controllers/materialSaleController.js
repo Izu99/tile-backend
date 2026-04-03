@@ -147,7 +147,7 @@ exports.addPayment = async (req, res, next) => {
         // 🔥 ATOMIC PAYMENT ADDITION: Use model static method
         const updatedMaterialSale = await MaterialSale.addPaymentAtomic(
             req.params.id, 
-            req.user.id, 
+            getEffectiveCompanyId(req.user), 
             req.body
         );
 
@@ -178,7 +178,7 @@ exports.updateStatus = async (req, res, next) => {
         // 🔥 ATOMIC STATUS UPDATE: Use model static method
         const updatedMaterialSale = await MaterialSale.updateStatusAtomic(
             req.params.id, 
-            req.user.id, 
+            getEffectiveCompanyId(req.user), 
             status
         );
 
@@ -205,7 +205,7 @@ exports.deleteMaterialSale = async (req, res, next) => {
         
         const materialSale = await MaterialSale.findOne({
             _id: req.params.id,
-            user: req.user.id,
+            user: getEffectiveCompanyId(req.user),
         });
 
         if (!materialSale) return errorResponse(res, 404, 'Material sale not found');

@@ -13,9 +13,9 @@ const connectDB = async () => {
       maxIdleTimeMS: 30000,
 
       // 🔥 REDUCED TIMEOUT SETTINGS for faster failure detection
-      serverSelectionTimeoutMS: 10000, // Reduced from 30s
-      socketTimeoutMS: 30000,          // Reduced from 60s
-      connectTimeoutMS: 10000,         // Reduced from 30s
+      serverSelectionTimeoutMS: 5000,  // 5s - fail fast on network issues
+      socketTimeoutMS: 10000,          // 10s socket timeout
+      connectTimeoutMS: 5000,          // 5s connect timeout
 
       // 🚀 OPTIMIZED HEARTBEAT for better connection health
       heartbeatFrequencyMS: 5000, // More frequent heartbeats

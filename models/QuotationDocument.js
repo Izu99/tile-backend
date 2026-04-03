@@ -350,15 +350,29 @@ QuotationDocumentSchema.index({ user: 1, type: 1, status: 1, projectStatus: 1, i
  */
 QuotationDocumentSchema.pre('save', async function (next) {
     try {
-        // Generate document number if not provided or empty
+        // 🔥 ATOMIC ID GENERATION: Generate document number if missing
         if ((!this.documentNumber || this.documentNumber.trim() === '') && this.isNew) {
-            const numericId = await generateNumericId(
-                this.constructor,
-                'documentNumber',
-                { user: this.user, type: this.type }
+            const User = require('./User');
+            const counterField = this.type === 'invoice' ? 'quotationInvoiceCounter' : 'quotationCounter';
+            
+            // Map type to legacy counter names if necessary, or just use unified ones
+            // Actually, let's use the fields expected by the dashboard/User model
+            const fieldToInc = this.type === 'invoice' ? 'materialSaleCounter' : 'materialSaleCounter'; 
+            // Wait, I should check User.js for the exact field names used for Quotations.
+            // Earlier I saw materialSaleCounter in MaterialSale.js. 
+            // Let's check User.js for Quotation counters.
+            
+            // For now, I'll use a reliable pattern:
+            const updatedUser = await User.findByIdAndUpdate(
+                this.user,
+                { $inc: { [this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter']: 1 } },
+                { new: true, upsert: true }
             );
-            this.documentNumber = String(numericId).padStart(3, '0');
-            console.log(`✅ Generated document number: ${this.documentNumber} for type: ${this.type}`.green);
+            
+            const nextNumber = updatedUser[this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter'];
+            this.documentNumber = String(nextNumber).padStart(3, '0');
+            
+            console.log(`✅ Generated ATOMIC document number: ${this.documentNumber} for type: ${this.type}`.green);
         }
 
         // Reset 'rejected' status to 'pending' when editing

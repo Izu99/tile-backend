@@ -135,7 +135,7 @@ exports.login = async (req, res, next) => {
             {
                 id: user._id,
                 role: user.role,
-                companyId: user._id,
+                companyId: (user.role === 'admin' && user.companyId) ? user.companyId : user._id,
                 email: user.email,
                 isActive: user.isActive,
                 companyName: user.companyName || ''
