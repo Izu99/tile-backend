@@ -165,6 +165,77 @@ exports.addPayment = async (req, res, next) => {
     }
 };
 
+// @desc    Update a specific payment record
+// @route   PUT /api/material-sales/:id/payments/:paymentId
+// @access  Private
+exports.updatePayment = async (req, res, next) => {
+    try {
+        const startTime = Date.now();
+        const { amount, date, description } = req.body;
+
+        const sale = await MaterialSale.findOne({
+            _id: req.params.id,
+            user: getEffectiveCompanyId(req.user)
+        });
+        if (!sale) return errorResponse(res, 404, 'Material sale not found');
+
+        const payment = sale.paymentHistory.id(req.params.paymentId);
+        if (!payment) return errorResponse(res, 404, 'Payment record not found');
+
+        if (amount !== undefined) payment.amount = amount;
+        if (date !== undefined) payment.date = new Date(date);
+        if (description !== undefined) payment.description = description;
+
+        // Recalculate status
+        const totalPaid = sale.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
+        const totalAmount = sale.items.reduce((sum, item) => sum + (item.totalSqft * item.unitPrice), 0);
+        if (totalPaid >= totalAmount && totalAmount > 0) sale.status = 'paid';
+        else if (totalPaid > 0) sale.status = 'partial';
+        else sale.status = 'pending';
+
+        await sale.save();
+        return createApiResponse(res, 200, 'Payment updated successfully', sale, null, startTime);
+    } catch (error) {
+        console.error('❌ updatePayment error:', error);
+        next(error);
+    }
+};
+
+// @desc    Delete a specific payment record
+// @route   DELETE /api/material-sales/:id/payments/:paymentId
+// @access  Private
+exports.deletePayment = async (req, res, next) => {
+    try {
+        const startTime = Date.now();
+
+        const sale = await MaterialSale.findOne({
+            _id: req.params.id,
+            user: getEffectiveCompanyId(req.user)
+        });
+        if (!sale) return errorResponse(res, 404, 'Material sale not found');
+
+        const paymentIndex = sale.paymentHistory.findIndex(
+            p => p._id.toString() === req.params.paymentId
+        );
+        if (paymentIndex === -1) return errorResponse(res, 404, 'Payment record not found');
+
+        sale.paymentHistory.splice(paymentIndex, 1);
+
+        // Recalculate status
+        const totalPaid = sale.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
+        const totalAmount = sale.items.reduce((sum, item) => sum + (item.totalSqft * item.unitPrice), 0);
+        if (totalPaid >= totalAmount && totalAmount > 0) sale.status = 'paid';
+        else if (totalPaid > 0) sale.status = 'partial';
+        else sale.status = 'pending';
+
+        await sale.save();
+        return createApiResponse(res, 200, 'Payment deleted successfully', sale, null, startTime);
+    } catch (error) {
+        console.error('❌ deletePayment error:', error);
+        next(error);
+    }
+};
+
 // @desc    Update status - OPTIMIZED with atomic operations
 // @route   PATCH /api/material-sales/:id/status
 // @access  Private

@@ -11,6 +11,8 @@ const {
     convertToInvoice,
     updateStatus,
     addPayment,
+    updatePayment,
+    deletePayment,
     deleteQuotation,
 } = require('../controllers/quotationController');
 
@@ -32,5 +34,7 @@ router.route('/:id')
 router.patch('/:id/convert-to-invoice', protect, convertToInvoice);
 router.patch('/:id/status', protect, updateStatus);
 router.post('/:id/payments', protect, addPayment);
+router.put('/:id/payments/:paymentId', protect, updatePayment);
+router.delete('/:id/payments/:paymentId', protect, deletePayment);
 
 module.exports = router;

@@ -216,6 +216,79 @@ exports.addPayment = async (req, res, next) => {
     }
 };
 
+// @desc    Update a specific payment record
+// @route   PUT /api/quotations/:id/payments/:paymentId
+// @access  Private
+exports.updatePayment = async (req, res, next) => {
+    try {
+        const startTime = Date.now();
+        const { amount, date, description } = req.body;
+
+        const doc = await QuotationDocument.findOne({
+            _id: req.params.id,
+            user: getEffectiveCompanyId(req.user)
+        });
+        if (!doc) return errorResponse(res, 404, 'Document not found');
+
+        const payment = doc.paymentHistory.id(req.params.paymentId);
+        if (!payment) return errorResponse(res, 404, 'Payment record not found');
+
+        if (amount !== undefined) payment.amount = amount;
+        if (date !== undefined) payment.date = new Date(date);
+        if (description !== undefined) payment.description = description;
+
+        // Recalculate status
+        const totalPaid = doc.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
+        const subtotal = doc.lineItems.reduce((sum, item) => sum + (item.quantity * item.item.sellingPrice), 0);
+        if (totalPaid >= subtotal) doc.status = 'paid';
+        else if (totalPaid > 0) doc.status = 'partial';
+        else doc.status = doc.type === 'invoice' ? 'converted' : doc.status;
+
+        await doc.save();
+        logPerformance('Update Payment', startTime, 1, `Doc: ${req.params.id}`);
+        return createApiResponse(res, 200, 'Payment updated successfully', doc, null, startTime);
+    } catch (error) {
+        console.error('❌ updatePayment error:', error);
+        next(error);
+    }
+};
+
+// @desc    Delete a specific payment record
+// @route   DELETE /api/quotations/:id/payments/:paymentId
+// @access  Private
+exports.deletePayment = async (req, res, next) => {
+    try {
+        const startTime = Date.now();
+
+        const doc = await QuotationDocument.findOne({
+            _id: req.params.id,
+            user: getEffectiveCompanyId(req.user)
+        });
+        if (!doc) return errorResponse(res, 404, 'Document not found');
+
+        const paymentIndex = doc.paymentHistory.findIndex(
+            p => p._id.toString() === req.params.paymentId
+        );
+        if (paymentIndex === -1) return errorResponse(res, 404, 'Payment record not found');
+
+        doc.paymentHistory.splice(paymentIndex, 1);
+
+        // Recalculate status
+        const totalPaid = doc.paymentHistory.reduce((sum, p) => sum + p.amount, 0);
+        const subtotal = doc.lineItems.reduce((sum, item) => sum + (item.quantity * item.item.sellingPrice), 0);
+        if (totalPaid >= subtotal && subtotal > 0) doc.status = 'paid';
+        else if (totalPaid > 0) doc.status = 'partial';
+        else doc.status = doc.type === 'invoice' ? 'converted' : 'pending';
+
+        await doc.save();
+        logPerformance('Delete Payment', startTime, 1, `Doc: ${req.params.id}`);
+        return createApiResponse(res, 200, 'Payment deleted successfully', doc, null, startTime);
+    } catch (error) {
+        console.error('❌ deletePayment error:', error);
+        next(error);
+    }
+};
+
 // @desc    Update status (Manual) - SAFE APPROACH with proper JobCost sync
 // @route   PATCH /api/quotations/:id/status
 // @access  Private
@@ -344,6 +417,8 @@ module.exports = {
     createQuotation: exports.createQuotation,
     convertToInvoice: exports.convertToInvoice,
     addPayment: exports.addPayment,
+    updatePayment: exports.updatePayment,
+    deletePayment: exports.deletePayment,
     updateStatus: exports.updateStatus,
     getQuotation: exports.getQuotation,
     updateQuotation: exports.updateQuotation,

@@ -9,6 +9,8 @@ const {
     createMaterialSale,
     updateMaterialSale,
     addPayment,
+    updatePayment,
+    deletePayment,
     updateStatus,
     deleteMaterialSale,
     searchCustomerByPhone,
@@ -30,6 +32,8 @@ router.route('/:id')
     .delete(protect, deleteMaterialSale);
 
 router.post('/:id/payments', protect, addPayment);
+router.put('/:id/payments/:paymentId', protect, updatePayment);
+router.delete('/:id/payments/:paymentId', protect, deletePayment);
 router.patch('/:id/status', protect, updateStatus);
 router.get('/search-customer', protect, searchCustomerByPhone);
 
