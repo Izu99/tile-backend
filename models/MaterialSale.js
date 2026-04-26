@@ -388,6 +388,9 @@ MaterialSaleSchema.statics.createNewWithAtomicId = async function(userId, materi
       }
       
       // Atomic increment using findByIdAndUpdate
+      console.log(`🔢 Generating atomic ID for Material Sale: Attempting to increment materialSaleCounter for user ${userId}`);
+
+      // Atomic increment using findByIdAndUpdate
       const updatedUser = await User.findByIdAndUpdate(
         userId,
         { $inc: { materialSaleCounter: 1 } },
@@ -395,11 +398,19 @@ MaterialSaleSchema.statics.createNewWithAtomicId = async function(userId, materi
       );
       
       if (!updatedUser) {
+        console.error(`❌ FAILED to increment materialSaleCounter for user ${userId} - user not found`);
         throw new Error('Failed to increment material sale counter');
       }
       
       const nextId = updatedUser.materialSaleCounter;
+      console.log(`✅ Counter incremented: materialSaleCounter is now ${nextId}`);
+
+      if (typeof nextId === 'undefined') {
+        console.error(`🚨 CRITICAL: materialSaleCounter is UNDEFINED in updatedUser object! Check User schema.`);
+      }
+
       const invoiceNumber = `MS-${nextId.toString().padStart(4, '0')}`;
+      console.log(`📝 Generated invoice number: ${invoiceNumber}`);
       
       // Prepare data with generated invoice number
       const completeData = {
@@ -408,10 +419,12 @@ MaterialSaleSchema.statics.createNewWithAtomicId = async function(userId, materi
         user: userId
       };
       
+      console.log(`📦 Creating Material Sale document in database...`);
+
       // Create material sale - middleware handles dashboard sync
       const materialSale = await this.create(completeData);
       
-      console.log(`✅ Created material sale with atomic invoice number: ${invoiceNumber}`.green);
+      console.log(`✅ Created material sale successfully: ${invoiceNumber} (ID: ${materialSale._id})`.green);
       return materialSale;
       
     } catch (error) {

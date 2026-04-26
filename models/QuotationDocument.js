@@ -353,26 +353,30 @@ QuotationDocumentSchema.pre('save', async function (next) {
         // 🔥 ATOMIC ID GENERATION: Generate document number if missing
         if ((!this.documentNumber || this.documentNumber.trim() === '') && this.isNew) {
             const User = require('./User');
-            const counterField = this.type === 'invoice' ? 'quotationInvoiceCounter' : 'quotationCounter';
             
-            // Map type to legacy counter names if necessary, or just use unified ones
-            // Actually, let's use the fields expected by the dashboard/User model
-            const fieldToInc = this.type === 'invoice' ? 'materialSaleCounter' : 'materialSaleCounter'; 
-            // Wait, I should check User.js for the exact field names used for Quotations.
-            // Earlier I saw materialSaleCounter in MaterialSale.js. 
-            // Let's check User.js for Quotation counters.
-            
-            // For now, I'll use a reliable pattern:
+            console.log(`🔢 Generating atomic ID for ${this.type}: Attempting to increment ${this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter'} for user ${this.user}`);
+
             const updatedUser = await User.findByIdAndUpdate(
                 this.user,
                 { $inc: { [this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter']: 1 } },
                 { new: true, upsert: true }
             );
-            
-            const nextNumber = updatedUser[this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter'];
-            this.documentNumber = String(nextNumber).padStart(3, '0');
-            
-            console.log(`✅ Generated ATOMIC document number: ${this.documentNumber} for type: ${this.type}`.green);
+
+            if (updatedUser) {
+                const counterField = this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter';
+                const nextNumber = updatedUser[counterField];
+                
+                console.log(`✅ Counter incremented: ${counterField} is now ${nextNumber}`);
+                
+                if (typeof nextNumber === 'undefined') {
+                    console.error(`🚨 CRITICAL: Counter ${counterField} is UNDEFINED in updatedUser object! Check User schema.`);
+                }
+
+                this.documentNumber = String(nextNumber).padStart(3, '0');
+                console.log(`📝 Generated document number: ${this.documentNumber}`);
+            } else {
+                console.error(`❌ FAILED to increment counter for user ${this.user} - user document not returned`);
+            }
         }
 
         // Reset 'rejected' status to 'pending' when editing

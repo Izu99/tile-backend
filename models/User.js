@@ -204,6 +204,16 @@ const UserSchema = new mongoose.Schema(
             default: 0,
             min: 0,
         },
+        quotationCounter: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        invoiceCounter: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
     },
     {
         timestamps: true,
@@ -760,6 +770,8 @@ UserSchema.methods.toAuthJSON = function() {
         siteVisitCounter: this.siteVisitCounter || 0,
         materialSaleCounter: this.materialSaleCounter || 0,
         jobCostCounter: this.jobCostCounter || 0,
+        quotationCounter: this.quotationCounter || 0,
+        invoiceCounter: this.invoiceCounter || 0,
     };
     
     // 🔥 CRITICAL PERFORMANCE FIX: Exclude ALL image fields for super-admin
