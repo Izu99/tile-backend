@@ -461,34 +461,164 @@ JobCostSchema.post('findOneAndDelete', async function(doc) {
 JobCostSchema.statics.getOptimizedList = async function(userId, options = {}) {
   const { 
     page = 1, 
-    limit = 15, 
+    limit = 20,
     search, 
-    completed 
+    completed,
+    type,
+    status,
+    sort,
+    startDate,
+    endDate,
   } = options;
+
+  // Normalize incoming filters to be case-insensitive and treat 'all' as unset
+  const normType = (typeof type === 'string' && type.trim().length) ? type.toLowerCase() : null;
+  const normStatus = (typeof status === 'string' && status.trim().length) ? status.toLowerCase() : null;
 
   let query = { user: new mongoose.Types.ObjectId(userId) };
 
-  // Add search if provided - uses text index for optimal performance
-  if (search && typeof search === 'string') {
-    query.$text = { $search: search };
+  // 🔥 SEARCH: regex search on customerName, projectTitle, documentId
+  if (search && typeof search === 'string' && search.trim()) {
+    const searchRegex = new RegExp(search.trim(), 'i');
+    query.$and = query.$and || [];
+    query.$and.push({
+      $or: [
+        { customerName: searchRegex },
+        { projectTitle: searchRegex },
+        { documentId: searchRegex },
+        { quotationId: searchRegex },
+        { invoiceId: searchRegex },
+      ]
+    });
   }
 
-  // Add completion status filter - uses compound index { user: 1, completed: 1, invoiceDate: -1 }
-  if (completed !== undefined) {
-    query.completed = completed === 'true' || completed === true;
+  // 🔥 DATE FILTER
+  if (startDate || endDate) {
+    query.invoiceDate = {};
+    if (startDate) query.invoiceDate.$gte = new Date(startDate);
+    if (endDate) query.invoiceDate.$lte = new Date(endDate + 'T23:59:59.999Z');
   }
 
-  // Execute optimized queries in parallel with lean() for memory efficiency
+  // 🔥 TYPE + STATUS FILTER
+  if (normType && normType !== 'all') {
+    query.type = normType;
+    if (normStatus && normStatus !== 'all') {
+      query.customerInvoiceStatus = normStatus;
+    } else {
+      if (normType === 'quotation') {
+        query.customerInvoiceStatus = 'approved';
+      } else {
+        query.customerInvoiceStatus = { $in: ['paid', 'partial', 'converted'] };
+      }
+    }
+  } else {
+    if (normStatus && normStatus !== 'all') {
+      if (normStatus === 'approved') {
+        query.type = 'quotation';
+      } else if (['paid', 'partial', 'converted'].includes(normStatus)) {
+        query.type = 'invoice';
+      }
+      query.customerInvoiceStatus = normStatus;
+    } else {
+      // Default: approved quotations + paid/partial/converted invoices
+      const defaultOr = [
+        { type: 'quotation', customerInvoiceStatus: 'approved' },
+        { type: 'invoice', customerInvoiceStatus: { $in: ['paid', 'partial', 'converted'] } },
+      ];
+      if (query.$and) {
+        // Already have $and from search - add $or inside it
+        query.$and.push({ $or: defaultOr });
+      } else {
+        query.$or = defaultOr;
+      }
+    }
+  }
+
+  // 🔥 STATS QUERY: Clone query AFTER all filters (type/status/date/search) are applied
+  // This ensures summary cards update dynamically based on the selected filter
+  // Deep clone preserving ObjectId, RegExp, Date objects (JSON.parse loses them)
+  const statsQuery = { ...query };
+  if (query.$and) statsQuery.$and = query.$and.map(c => ({ ...c }));
+  if (query.$or) statsQuery.$or = query.$or.map(c => ({ ...c }));
+  if (query.invoiceDate) statsQuery.invoiceDate = { ...query.invoiceDate };
+  if (query.type) statsQuery.type = query.type;
+  if (query.customerInvoiceStatus) statsQuery.customerInvoiceStatus = query.customerInvoiceStatus;
+
+  // Sort
+  let sortObj = { createdAt: -1 };
+  if (sort === 'oldest') sortObj = { createdAt: 1 };
+
   const skip = (parseInt(page) - 1) * parseInt(limit);
-  const [total, jobCosts] = await Promise.all([
+  const [total, jobCosts, statsResult] = await Promise.all([
     this.countDocuments(query),
     this.find(query)
-      .select('documentId type customerName customerPhone projectTitle netProfit materialCost completed createdAt updatedAt quotationId invoiceId invoiceItems purchaseOrderItems otherExpenses customerInvoiceStatus')
-      .sort({ createdAt: -1 })
+      .select('_id documentId type customerName customerPhone projectTitle netProfit materialCost completed createdAt updatedAt quotationId invoiceId invoiceItems purchaseOrderItems otherExpenses customerInvoiceStatus invoiceDate')
+      .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
-      .lean({ virtuals: true }) // 🔥 FIX: Enable virtuals to compute totalRevenue, totalCost, profit, etc.
+      .lean({ virtuals: true }),
+    this.aggregate([
+      { $match: statsQuery },
+      {
+        $project: {
+          netProfit: 1,
+          materialCost: 1,
+          type: 1,
+          customerInvoiceStatus: 1,
+          totalRevenue: {
+            $sum: {
+              $map: {
+                input: '$invoiceItems',
+                as: 'item',
+                in: { $multiply: [{ $ifNull: ['$$item.quantity', 0] }, { $ifNull: ['$$item.sellingPrice', 0] }] }
+              }
+            }
+          },
+          otherExpensesCost: {
+            $sum: '$otherExpenses.amount'
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: '$totalRevenue' },
+          totalMaterialCost: { $sum: '$materialCost' },
+          totalOtherExpensesCost: { $sum: '$otherExpensesCost' },
+          totalProfit: { $sum: '$netProfit' },
+          quotationsCount: { $sum: { $cond: [{ $eq: ['$type', 'quotation'] }, 1, 0] } },
+          convertedCount: { $sum: { $cond: [{ $eq: ['$customerInvoiceStatus', 'converted'] }, 1, 0] } },
+          paidCount: { $sum: { $cond: [{ $eq: ['$customerInvoiceStatus', 'paid'] }, 1, 0] } },
+          partialCount: { $sum: { $cond: [{ $eq: ['$customerInvoiceStatus', 'partial'] }, 1, 0] } }
+        }
+      }
+    ])
   ]);
+
+  const stats = statsResult[0] || {
+    totalRevenue: 0,
+    totalMaterialCost: 0,
+    totalOtherExpensesCost: 0,
+    totalProfit: 0,
+    quotationsCount: 0,
+    convertedCount: 0,
+    paidCount: 0,
+    partialCount: 0
+  };
+
+  const totalCost = (stats.totalMaterialCost || 0) + (stats.totalOtherExpensesCost || 0);
+  const averageMargin = stats.totalRevenue > 0 ? (stats.totalProfit / stats.totalRevenue) * 100 : 0;
+
+  const summaryStats = {
+    totalRevenue: stats.totalRevenue || 0,
+    totalCost: totalCost || 0,
+    totalProfit: stats.totalProfit || 0,
+    averageMargin: averageMargin || 0,
+    quotationsCount: stats.quotationsCount || 0,
+    convertedCount: stats.convertedCount || 0,
+    paidCount: stats.paidCount || 0,
+    partialCount: stats.partialCount || 0
+  };
 
   const totalPages = Math.ceil(total / parseInt(limit));
   const hasMore = parseInt(page) < totalPages;
@@ -500,7 +630,8 @@ JobCostSchema.statics.getOptimizedList = async function(userId, options = {}) {
       pages: totalPages,
       total: total,
       limit: parseInt(limit),
-      hasMore
+      hasMore,
+      stats: summaryStats
     }
   };
 };

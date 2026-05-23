@@ -35,7 +35,15 @@ exports.getQuotations = async (req, res, next) => {
         const query = { user: getEffectiveCompanyId(req.user) };
 
         if (req.query.type) query.type = req.query.type;
-        if (req.query.status) query.status = req.query.status;
+        if (req.query.status) {
+            // Support multiple statuses: ?status=approved,invoiced,partial
+            const statuses = req.query.status.split(',').map(s => s.trim()).filter(Boolean);
+            if (statuses.length === 1) {
+                query.status = statuses[0];
+            } else {
+                query.status = { $in: statuses };
+            }
+        }
 
         // 🔥 DATE FILTER: Filter by invoiceDate range
         if (req.query.startDate || req.query.endDate) {
@@ -81,8 +89,17 @@ exports.getQuotations = async (req, res, next) => {
             }
         }
 
+        // 🔥 Type Filter Fix: If explicitly filtering by one type, the other type's count should be 0
+        const qCountPromise = req.query.type === 'invoice' 
+            ? Promise.resolve(0) 
+            : QuotationDocument.countDocuments({ ...query, type: 'quotation' }).catch(() => 0);
+            
+        const iCountPromise = req.query.type === 'quotation' 
+            ? Promise.resolve(0) 
+            : QuotationDocument.countDocuments({ ...query, type: 'invoice' }).catch(() => 0);
+
         // 🔥 OPTIMIZATION: Parallel execution with lean() + virtuals + select() + pagination
-        const [total, documents] = await Promise.all([
+        const [total, documents, distinctCustomers, quotationCount, invoiceCount] = await Promise.all([
             QuotationDocument.countDocuments(query).maxTimeMS(5000),
             QuotationDocument.find(query)
                 .select('documentNumber type status customerName customerPhone customerAddress projectTitle totalAmount dueDate invoiceDate createdAt lineItems paymentHistory')
@@ -90,8 +107,13 @@ exports.getQuotations = async (req, res, next) => {
                 .skip(skip)
                 .limit(limit)
                 .maxTimeMS(5000)
-                .lean({ virtuals: true })
+                .lean({ virtuals: true }),
+            QuotationDocument.distinct('customerName', query).then(res => res.length).catch(() => 0),
+            qCountPromise,
+            iCountPromise
         ]);
+
+        const customerCount = distinctCustomers;
 
         // 🔥 VIRTUALS SUPPORT: Add necessary virtuals manually for enhanced lean response
         const documentsWithVirtuals = documents.map(doc => ({
@@ -114,7 +136,10 @@ exports.getQuotations = async (req, res, next) => {
             limit,
             total,
             pages: Math.ceil(total / limit),
-            hasMore: page < Math.ceil(total / limit)
+            hasMore: page < Math.ceil(total / limit),
+            customerCount,
+            quotationCount,
+            invoiceCount
         }, startTime);
     } catch (error) {
         console.error('❌ getQuotations error:', error);

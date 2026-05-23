@@ -484,6 +484,16 @@ QuotationDocumentSchema.post('save', async function(doc) {
             await updateJobCostForInvoiceConversion(doc);
         }
 
+        // 🔥 DIRECT INVOICE: Auto-create JobCost for directly created invoices
+        if (doc.type === 'invoice' && this.isNew) {
+            await syncDirectInvoiceJobCost(doc);
+        }
+
+        // 🔥 INVOICE STATUS UPDATE: Sync customerInvoiceStatus when invoice status changes
+        if (doc.type === 'invoice' && !this.isNew && this.isModified('status')) {
+            await syncInvoiceStatusToJobCost(doc);
+        }
+
     } catch (error) {
         console.error('❌ Post-save hook error:', error);
         // Don't throw error to avoid breaking document save
@@ -540,6 +550,7 @@ async function syncJobCostDocument(doc) {
                 customerPhone: doc.customerPhone || '',
                 projectTitle: doc.projectTitle,
                 invoiceDate: doc.invoiceDate,
+                customerInvoiceStatus: doc.status, // ✅ Set actual status
                 invoiceItems: doc.lineItems.map(item => ({
                     category: (item.item && item.item.category) || item.category || 'General',
                     name: (item.item && item.item.name) || item.displayName || 'Unknown Item',
@@ -620,13 +631,75 @@ async function updateJobCostForInvoiceConversion(doc) {
             jobCost.invoiceId = `INV-${doc.documentNumber}`;
             jobCost.type = 'invoice';
             jobCost.customerInvoiceStatus = doc.status;
+            jobCost.invoiceDate = doc.invoiceDate; // ✅ Update to invoice date
             await jobCost.save();
             
-            console.log(`✅ Updated JobCost ${jobCost._id} with invoiceId: INV-${doc.documentNumber} and status: ${doc.status}`.green);
+            console.log(`✅ Updated JobCost ${jobCost._id} with invoiceId: INV-${doc.documentNumber}, status: ${doc.status}, date: ${doc.invoiceDate}`.green);
         }
     } catch (error) {
         console.error('❌ JobCost invoice conversion error:', error);
-        // Don't throw to avoid breaking the main operation
+    }
+}
+
+/**
+ * Auto-create JobCost for directly created invoices (not converted from quotation)
+ */
+async function syncDirectInvoiceJobCost(doc) {
+    try {
+        const JobCost = require('./JobCost');
+        
+        // Check if job cost already exists
+        const existing = await JobCost.findOne({
+            invoiceId: `INV-${doc.documentNumber}`,
+            user: doc.user
+        });
+        if (existing) return;
+        
+        const jobCostData = {
+            documentId: doc.documentNumber,
+            type: 'invoice',
+            quotationId: null,
+            invoiceId: `INV-${doc.documentNumber}`,
+            customerName: doc.customerName,
+            customerPhone: doc.customerPhone || '',
+            projectTitle: doc.projectTitle || doc.customerName,
+            invoiceDate: doc.invoiceDate,
+            customerInvoiceStatus: doc.status,
+            invoiceItems: (doc.lineItems || []).map(item => ({
+                category: (item.item && item.item.category) || 'General',
+                name: (item.item && item.item.name) || item.displayName || 'Unknown',
+                quantity: item.quantity || 0,
+                unit: (item.item && item.item.unit) || '',
+                costPrice: (item.item && item.item.costPrice) || 0,
+                sellingPrice: (item.item && item.item.sellingPrice) || 0,
+            })),
+            purchaseOrderItems: [],
+            otherExpenses: [],
+            completed: doc.status === 'paid',
+            user: doc.user,
+        };
+        
+        await JobCost.create(jobCostData);
+        console.log(`✅ Auto-created JobCost for direct invoice INV-${doc.documentNumber}`.green);
+    } catch (error) {
+        console.error('❌ Direct invoice JobCost sync error:', error);
+    }
+}
+
+/**
+ * Sync customerInvoiceStatus when invoice status changes
+ */
+async function syncInvoiceStatusToJobCost(doc) {
+    try {
+        const JobCost = require('./JobCost');
+        
+        await JobCost.updateMany(
+            { invoiceId: `INV-${doc.documentNumber}`, user: doc.user },
+            { $set: { customerInvoiceStatus: doc.status, completed: doc.status === 'paid' } }
+        );
+        console.log(`✅ Synced status '${doc.status}' to JobCost for INV-${doc.documentNumber}`.green);
+    } catch (error) {
+        console.error('❌ Invoice status sync error:', error);
     }
 }
 

@@ -63,9 +63,18 @@ exports.getJobCost = async (req, res, next) => {
     try {
         const startTime = Date.now();
         
-        let query = { _id: req.params.id };
+        const orConditions = [
+            { documentId: req.params.id },
+            { invoiceId: req.params.id },
+            { quotationId: req.params.id },
+        ];
+        if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+            orConditions.unshift({ _id: req.params.id });
+        }
+
+        let query = { $or: orConditions };
         if (req.user.role !== 'super-admin') {
-            query.user = req.user.id;
+            query.$and = [{ user: req.user.id }];
         }
 
         // 🔥 LEAN VIRTUALS: Use lean() with virtuals for memory optimization + virtual fields

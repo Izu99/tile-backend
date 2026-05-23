@@ -661,12 +661,19 @@ siteVisitSchema.statics.getOptimizedList = async function(companyId, options = {
 
   let query = { companyId: new mongoose.Types.ObjectId(companyId) };
 
-  // Add search if provided - uses text index for optimal performance
-  if (search && typeof search === 'string') {
-    query.$text = { $search: search };
+  // Add search - regex for partial match on customerName, projectTitle, contactNo, id
+  if (search && typeof search === 'string' && search.trim()) {
+    const searchRegex = new RegExp(search.trim(), 'i');
+    query.$or = [
+      { customerName: searchRegex },
+      { projectTitle: searchRegex },
+      { contactNo: searchRegex },
+      { id: searchRegex },
+      { location: searchRegex },
+    ];
   }
 
-  // Add status filter - uses compound index { companyId: 1, status: 1, date: -1 }
+  // Add status filter
   if (status) {
     query.status = status;
   }
@@ -680,15 +687,34 @@ siteVisitSchema.statics.getOptimizedList = async function(companyId, options = {
 
   // Execute optimized queries in parallel with lean() for memory efficiency
   const skip = (parseInt(page) - 1) * parseInt(limit);
-  const [total, siteVisits] = await Promise.all([
+  const [total, siteVisits, statusCounts] = await Promise.all([
     this.countDocuments(query),
     this.find(query)
       .select('id customerName projectTitle date charge status contactNo location colorCode thickness floorCondition targetArea inspection otherDetails siteType linkedInvoiceId createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .lean({ virtuals: true }) // 🔥 LEAN VIRTUALS: Memory optimization + virtual fields
+      .lean({ virtuals: true }), // 🔥 LEAN VIRTUALS: Memory optimization + virtual fields
+    this.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          pendingCount: { $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] } },
+          invoicedCount: { $sum: { $cond: [{ $eq: ['$status', 'invoiced'] }, 1, 0] } },
+          paidCount: { $sum: { $cond: [{ $eq: ['$status', 'paid'] }, 1, 0] } },
+          convertedCount: { $sum: { $cond: [{ $eq: ['$status', 'converted'] }, 1, 0] } }
+        }
+      }
+    ])
   ]);
+
+  const stats = statusCounts[0] || {
+    pendingCount: 0,
+    invoicedCount: 0,
+    paidCount: 0,
+    convertedCount: 0
+  };
 
   const totalPages = Math.ceil(total / parseInt(limit));
   const hasMore = parseInt(page) < totalPages;
@@ -700,7 +726,8 @@ siteVisitSchema.statics.getOptimizedList = async function(companyId, options = {
       pages: totalPages,
       total: total,
       limit: parseInt(limit),
-      hasMore
+      hasMore,
+      stats
     }
   };
 };

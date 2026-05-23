@@ -49,23 +49,22 @@ const getSiteVisits = async (req, res) => {
     }
 
     // 🔥 CONSISTENT API RESPONSE: Use createApiResponse helper for standardized responses
+    // Compute overall totals (ignoring pagination) for details cards
+    const overallTotalVisits = await SiteVisit.countDocuments({ companyId }).maxTimeMS(5000);
+    const overallDistinctCustomers = await SiteVisit.distinct('customerName', { companyId }).then(res => res.length).catch(() => 0);
+    // Include overall totals in response meta
+    const responseMeta = {
+      ...result.pagination,
+      overallTotalVisits: overallTotalVisits,
+      overallCustomerCount: overallDistinctCustomers,
+    };
+    // 🔥 CONSISTENT API RESPONSE: Use createApiResponse helper for standardized responses
     return createApiResponse(
-      res, 
-      200, 
-      'Site visits retrieved successfully', 
+      res,
+      200,
+      'Site visits retrieved successfully',
       result.siteVisits,
-      {
-        ...result.pagination,
-        _performance: {
-          dbTimeMs: dbTime,
-          totalTimeMs: Date.now() - startTime
-        },
-        _debug: {
-          companyId: companyId,
-          companyName: req.user.companyName,
-          userEmail: req.user.email
-        }
-      },
+      responseMeta,
       startTime
     );
   } catch (error) {

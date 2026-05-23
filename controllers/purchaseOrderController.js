@@ -120,7 +120,7 @@ exports.getPurchaseOrders = async (req, res, next) => {
         }
 
         // 🔥 OPTIMIZATION: Parallel execution with lean() + virtuals + select() + pagination
-        const [total, purchaseOrders] = await Promise.all([
+        const [total, purchaseOrders, statsResult] = await Promise.all([
             PurchaseOrder.countDocuments(query),
             PurchaseOrder.find(query)
                 .populate('supplier', 'name phone email address')
@@ -128,8 +128,49 @@ exports.getPurchaseOrders = async (req, res, next) => {
                 .sort({ orderDate: -1 })
                 .skip(skip)
                 .limit(limit)
-                .lean({ virtuals: true }) // 🔥 LEAN VIRTUALS: Enables totalAmount virtual with performance boost
+                .lean({ virtuals: true }), // 🔥 LEAN VIRTUALS: Enables totalAmount virtual with performance boost
+            PurchaseOrder.aggregate([
+                { $match: query },
+                {
+                    $project: {
+                        status: 1,
+                        totalAmount: {
+                            $sum: {
+                                $map: {
+                                    input: '$items',
+                                    as: 'item',
+                                    in: { $multiply: [{ $ifNull: ['$$item.quantity', 0] }, { $ifNull: ['$$item.unitPrice', 0] }] }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    $group: {
+                        _id: null,
+                        totalActiveOrders: {
+                            $sum: { $cond: [{ $in: ['$status', ['Ordered', 'Delivered', 'Paid']] }, 1, 0] }
+                        },
+                        pendingDelivery: {
+                            $sum: { $cond: [{ $eq: ['$status', 'Ordered'] }, 1, 0] }
+                        },
+                        readyForPayment: {
+                            $sum: { $cond: [{ $eq: ['$status', 'Delivered'] }, 1, 0] }
+                        },
+                        totalInvestment: {
+                            $sum: { $cond: [{ $in: ['$status', ['Ordered', 'Delivered', 'Paid']] }, '$totalAmount', 0] }
+                        }
+                    }
+                }
+            ])
         ]);
+
+        const stats = statsResult[0] || {
+            totalActiveOrders: 0,
+            pendingDelivery: 0,
+            readyForPayment: 0,
+            totalInvestment: 0
+        };
 
         // Add image URLs to response - totalAmount virtual is now available with lean()
         const purchaseOrdersWithImages = purchaseOrders.map(po => {
@@ -145,6 +186,9 @@ exports.getPurchaseOrders = async (req, res, next) => {
         logPerformance('Purchase Orders Query', startTime, purchaseOrders.length, `${purchaseOrders.length}/${total} POs, page ${page}`);
 
         const pagination = calculatePaginationMeta(total, page, limit);
+        if (pagination) {
+            pagination.stats = stats;
+        }
 
         return createApiResponse(res, 200, 'Purchase orders retrieved successfully', purchaseOrdersWithImages, pagination, startTime);
     } catch (error) {

@@ -508,7 +508,7 @@ MaterialSaleSchema.statics.getOptimizedList = async function(userId, options = {
 
   // Execute optimized queries in parallel with lean() for memory efficiency
   const skip = (parseInt(page) - 1) * parseInt(limit);
-  const [total, materialSales] = await Promise.all([
+  const [total, materialSales, distinctCustomers] = await Promise.all([
     this.countDocuments(query),
     this.find(query)
       // 🔥 CRITICAL FIX: Return ALL fields including items, paymentHistory, customer details
@@ -517,9 +517,11 @@ MaterialSaleSchema.statics.getOptimizedList = async function(userId, options = {
       .sort(sortObj)
       .skip(skip)
       .limit(parseInt(limit))
-      .lean({ virtuals: true }) // 🔥 LEAN VIRTUALS: Memory optimization + virtual fields (totalAmount, amountDue, etc.)
+      .lean({ virtuals: true }), // 🔥 LEAN VIRTUALS: Memory optimization + virtual fields (totalAmount, amountDue, etc.)
+    this.distinct('customerName', query).then(res => res.length).catch(() => 0)
   ]);
 
+  const customerCount = distinctCustomers;
   const totalPages = Math.ceil(total / parseInt(limit));
   const hasMore = parseInt(page) < totalPages;
 
@@ -542,7 +544,8 @@ MaterialSaleSchema.statics.getOptimizedList = async function(userId, options = {
       pages: totalPages,
       total: total,
       limit: parseInt(limit),
-      hasMore
+      hasMore,
+      customerCount
     }
   };
 };
