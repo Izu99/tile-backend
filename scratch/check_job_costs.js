@@ -22,12 +22,9 @@ async function checkJobCosts() {
             user: mongoose.Schema.Types.ObjectId
         }, { collection: 'jobcosts' }));
 
-        // Statuses that represent approved quotations
-        // In the codebase we usually use ['approved', 'invoiced', 'partial', 'converted'] for "approved-like"
-        const approvedStatuses = ['approved', 'invoiced', 'partial', 'converted'];
-        
-        console.log(`Fetching quotations with status in [${approvedStatuses.join(', ')}]...`);
-        const approvedQuotations = await Quotation.find({ status: { $in: approvedStatuses } }).lean();
+        // Only approved quotations should guarantee job cost creation
+        console.log('Fetching quotations with status approved...');
+        const approvedQuotations = await Quotation.find({ status: 'approved', type: 'quotation' }).lean();
         
         console.log(`Found ${approvedQuotations.length} approved quotations.`);
 
@@ -35,10 +32,11 @@ async function checkJobCosts() {
         let missingList = [];
 
         for (const quo of approvedQuotations) {
-            // Check if job cost exists
+            // Check if job cost exists for the actual stored quotationId format
             const jobCost = await JobCost.findOne({ 
-                quotationId: quo.documentNumber,
-                type: 'quotation' 
+                quotationId: `QUO-${quo.documentNumber}`,
+                type: 'quotation',
+                user: quo.user
             }).lean();
 
             if (!jobCost) {

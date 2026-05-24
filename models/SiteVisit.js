@@ -118,7 +118,7 @@ siteVisitSchema.virtual('isRecent').get(function() {
  * ✅ Company A: SV-001 + Company B: SV-001 = ALLOWED
  * ❌ Company A: SV-001 + Company A: SV-001 = BLOCKED
  */
-siteVisitSchema.index({ id: 1, companyId: 1 }, { unique: true });
+siteVisitSchema.index({ id: 1, companyId: 1 }, { unique: true, sparse: true });
 
 /**
  * DASHBOARD FILTERING PERFORMANCE INDEX
@@ -528,11 +528,70 @@ siteVisitSchema.statics.getGroupedByCustomer = async function(companyId, filters
 };
 
 /**
+ * Get the maximum numeric site visit sequence for a company.
+ * This handles IDs like "SV-001", "SV-010", "SV-100" correctly.
+ */
+siteVisitSchema.statics.getMaxSiteVisitSequence = async function(companyId) {
+  const result = await this.aggregate([
+    { $match: { companyId: new mongoose.Types.ObjectId(companyId), id: { $regex: '^SV-\\d+$' } } },
+    { $project: { seq: { $toInt: [{ $substrBytes: ['$id', 3, { $strLenBytes: '$id' }] }] } } },
+    { $sort: { seq: -1 } },
+    { $limit: 1 }
+  ]);
+
+  return result.length > 0 ? result[0].seq : 0;
+};
+
+/**
  * 🔥 ATOMIC ID GENERATION SAFETY: Prevent race conditions with User model integration
+ * Initialize counter from max existing ID to ensure continuity (not restart from 0)
  */
 siteVisitSchema.statics.generateSiteVisitId = async function(companyId) {
   try {
-    // 🔥 ATOMIC COUNTER: Use User model's atomic counter system for consistency
+    // 🔥 INITIALIZE COUNTER FROM MAX EXISTING ID (first time only)
+    // Check if counter exists for this company
+    const existingCounter = await this.collection.findOne({ _id: `counter_${companyId}` });
+    
+    // Determine the current max sequence from existing site visit IDs
+    const maxSequence = await this.getMaxSiteVisitSequence(companyId);
+
+    if (!existingCounter) {
+      // Counter doesn't exist yet - initialize it from existing IDs
+      await this.collection.updateOne(
+        { _id: `counter_${companyId}` },
+        { $set: { sequence: maxSequence } },
+        { upsert: true }
+      );
+      console.log(`🔧 Initialized counter to ${maxSequence} for company ${companyId}`.cyan);
+    } else if (typeof existingCounter.sequence !== 'number' || existingCounter.sequence < maxSequence) {
+      // Existing counter is stale/low; advance it to current max ID
+      await this.collection.updateOne(
+        { _id: `counter_${companyId}` },
+        { $set: { sequence: maxSequence } }
+      );
+      console.log(`🔧 Updated counter from ${existingCounter.sequence} to ${maxSequence} for company ${companyId}`.cyan);
+    }
+
+    // 🔥 ATOMIC COUNTER: Use collection-level counter (strongly atomic)
+    // This reduces race conditions vs using the User document as the primary counter.
+    try {
+      const counter = await this.collection.findOneAndUpdate(
+        { _id: `counter_${companyId}` },
+        { $inc: { sequence: 1 } },
+        { upsert: true, returnDocument: 'after', projection: { sequence: 1 } }
+      );
+
+      const counterDoc = counter?.value ?? counter;
+      const nextId = counterDoc?.sequence || 1;
+      const siteVisitId = `SV-${nextId.toString().padStart(3, '0')}`;
+      console.log(`✅ Generated atomic site visit ID (collection counter): ${siteVisitId} for company ${companyId}`.green);
+      return siteVisitId;
+    } catch (colErr) {
+      console.warn('⚠️ Collection-level counter generation failed, falling back to User counter:', colErr.message);
+      // Fall through to User-based generation below
+    }
+
+    // 🔥 FALLBACK: Use User model's atomic counter system for consistency
     const User = require('./User');
     
     // Get current user to access/create site visit counter
@@ -541,9 +600,15 @@ siteVisitSchema.statics.generateSiteVisitId = async function(companyId) {
       throw new Error('Company not found');
     }
     
-    // Initialize site visit counter if it doesn't exist
-    if (typeof user.siteVisitCounter === 'undefined') {
-      user.siteVisitCounter = 0;
+    // If siteVisitCounter doesn't exist or is stale, initialize from max existing ID
+    if (typeof user.siteVisitCounter === 'undefined' || user.siteVisitCounter < maxSequence) {
+      // Update user counter to start from max existing
+      await User.findByIdAndUpdate(
+        companyId,
+        { $set: { siteVisitCounter: maxSequence } },
+        { new: true }
+      );
+      console.log(`🔧 Updated User.siteVisitCounter to ${maxSequence}`.cyan);
     }
     
     // Atomic increment using findByIdAndUpdate
@@ -560,7 +625,7 @@ siteVisitSchema.statics.generateSiteVisitId = async function(companyId) {
     const nextId = updatedUser.siteVisitCounter;
     const siteVisitId = `SV-${nextId.toString().padStart(3, '0')}`;
     
-    console.log(`✅ Generated atomic site visit ID: ${siteVisitId} for company ${companyId}`.green);
+    console.log(`✅ Generated atomic site visit ID (user counter fallback): ${siteVisitId} for company ${companyId}`.green);
     return siteVisitId;
     
   } catch (error) {
@@ -578,7 +643,8 @@ siteVisitSchema.statics.generateSiteVisitId = async function(companyId) {
         }
       );
       
-      const nextId = counter.value?.sequence || 1;
+      const counterDoc = counter?.value ?? counter;
+      const nextId = counterDoc?.sequence || 1;
       const fallbackId = `SV-${nextId.toString().padStart(3, '0')}`;
       console.log(`⚠️  Using fallback ID generation: ${fallbackId}`.yellow);
       return fallbackId;

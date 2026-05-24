@@ -350,30 +350,87 @@ QuotationDocumentSchema.index({ user: 1, type: 1, status: 1, projectStatus: 1, i
  */
 QuotationDocumentSchema.pre('save', async function (next) {
     try {
+        this._statusWasModifiedBeforeSave = this.isModified('status');
+        this._typeWasModifiedBeforeSave = this.isModified('type');
+
         // 🔥 ATOMIC ID GENERATION: Generate document number if missing
         if ((!this.documentNumber || this.documentNumber.trim() === '') && this.isNew) {
             const User = require('./User');
+            const counterField = this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter';
             
-            console.log(`🔢 Generating atomic ID for ${this.type}: Attempting to increment ${this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter'} for user ${this.user}`);
+            console.log(`🔢 Generating atomic ID for ${this.type}: Attempting to increment ${counterField} for user ${this.user}`);
+
+            // 🔥 INITIALIZE COUNTER FROM MAX EXISTING DOCUMENT (first time only)
+            // Check if this is the first time generating IDs for this user+type
+            let user = await User.findById(this.user);
+            if (user && (typeof user[counterField] === 'undefined' || user[counterField] === 0)) {
+              // Counter doesn't exist or is 0 - find the max documentNumber
+              const maxDoc = await mongoose.model('QuotationDocument').findOne({
+                user: this.user,
+                type: this.type
+              }).sort({ documentNumber: -1 }).select('documentNumber').lean();
+              
+              let maxNumber = 0;
+              if (maxDoc && maxDoc.documentNumber) {
+                maxNumber = parseInt(maxDoc.documentNumber) || 0;
+                console.log(`📊 Found max existing documentNumber: ${maxDoc.documentNumber} (numeric: ${maxNumber})`.cyan);
+              }
+              
+              // Initialize counter to maxNumber
+              if (maxNumber > 0) {
+                await User.findByIdAndUpdate(
+                  this.user,
+                  { $set: { [counterField]: maxNumber } },
+                  { new: true }
+                );
+                console.log(`🔧 Initialized ${counterField} to ${maxNumber} for user ${this.user}`.cyan);
+              }
+            }
 
             const updatedUser = await User.findByIdAndUpdate(
                 this.user,
-                { $inc: { [this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter']: 1 } },
+                { $inc: { [counterField]: 1 } },
                 { new: true, upsert: true }
             );
 
             if (updatedUser) {
-                const counterField = this.type === 'invoice' ? 'invoiceCounter' : 'quotationCounter';
-                const nextNumber = updatedUser[counterField];
-                
+                let nextNumber = updatedUser[counterField];
+
                 console.log(`✅ Counter incremented: ${counterField} is now ${nextNumber}`);
-                
+
                 if (typeof nextNumber === 'undefined') {
                     console.error(`🚨 CRITICAL: Counter ${counterField} is UNDEFINED in updatedUser object! Check User schema.`);
                 }
 
-                this.documentNumber = String(nextNumber).padStart(3, '0');
+                // Ensure generated documentNumber is unique for this user+type.
+                // In rare race conditions the counter may point to a value already used
+                // (e.g., when duplicates existed and were cleaned up). Retry incrementing
+                // the user's counter up to a small limit until a free number is found.
+                const DocModel = mongoose.model('QuotationDocument');
+                const MAX_RETRIES = 5;
+                let attempts = 0;
+                let candidate = String(nextNumber).padStart(3, '0');
+
+                while (attempts < MAX_RETRIES) {
+                    const exists = await DocModel.exists({ user: this.user, type: this.type, documentNumber: candidate });
+                    if (!exists) break;
+
+                    // Conflict detected, atomically increment user's counter again
+                    const bumped = await User.findByIdAndUpdate(
+                        this.user,
+                        { $inc: { [counterField]: 1 } },
+                        { new: true }
+                    );
+                    if (!bumped) break;
+                    nextNumber = bumped[counterField];
+                    candidate = String(nextNumber).padStart(3, '0');
+                    attempts += 1;
+                    console.warn(`⚠️ Detected existing documentNumber ${candidate - 0}. Bumped counter to ${nextNumber}`);
+                }
+
+                this.documentNumber = candidate;
                 console.log(`📝 Generated document number: ${this.documentNumber}`);
+                if (attempts === MAX_RETRIES) console.warn('⚠️ Max retries reached when generating documentNumber');
             } else {
                 console.error(`❌ FAILED to increment counter for user ${this.user} - user document not returned`);
             }
@@ -416,16 +473,17 @@ QuotationDocumentSchema.pre('findOneAndUpdate', async function(next) {
         // Get the update data
         const update = this.getUpdate();
         
-        // Check if status is being updated to 'approved'
+        // Check if status is being updated
         // Handle both $set and direct update formats
         const newStatus = update.$set?.status || update.status;
         
-        if (newStatus === 'approved') {
+        if (newStatus) {
             // Store the document ID for post-hook processing
-            this._statusChangedToApproved = true;
+            this._statusChanged = true;
+            this._newStatus = newStatus;
             this._docId = this.getQuery()._id;
             this._userId = this.getQuery().user;
-            console.log(`🔔 Pre-hook: Status changing to approved for document ${this._docId}`.yellow);
+            console.log(`🔔 Pre-hook: Status changing to ${newStatus} for document ${this._docId}`.yellow);
         }
         
         next();
@@ -440,14 +498,20 @@ QuotationDocumentSchema.pre('findOneAndUpdate', async function(next) {
  */
 QuotationDocumentSchema.post('findOneAndUpdate', async function(doc) {
     try {
-        // If status was changed to 'approved' and it's a quotation, sync JobCost
-        if (this._statusChangedToApproved && doc && doc.type === 'quotation' && doc.status === 'approved') {
-            console.log(`✅ Atomic status update detected: Syncing JobCost for ${doc.displayDocumentNumber}`.green);
-            await syncJobCostDocument(doc);
+        // If status changed, sync JobCost status for both quotations and invoices.
+        if (this._statusChanged && doc) {
+            if (doc.type === 'quotation' && doc.status === 'approved') {
+                console.log(`✅ Atomic status update detected: Syncing JobCost for ${doc.displayDocumentNumber}`.green);
+                await syncJobCostDocument(doc);
+            } else if (doc.type === 'quotation') {
+                await syncQuotationStatusToJobCost(doc);
+            } else if (doc.type === 'invoice') {
+                await syncInvoiceStatusToJobCost(doc);
+            }
         } else {
             // Debug logging to understand why sync didn't trigger
-            if (this._statusChangedToApproved) {
-                console.log(`⚠️ Status changed to approved but conditions not met:`.yellow);
+            if (this._statusChanged) {
+                console.log(`⚠️ Status changed but conditions not met:`.yellow);
                 console.log(`   - Document exists: ${!!doc}`);
                 console.log(`   - Document type: ${doc?.type}`);
                 console.log(`   - Document status: ${doc?.status}`);
@@ -474,13 +538,21 @@ QuotationDocumentSchema.post('save', async function(doc) {
             console.log(`✅ Dashboard sync: Incremented ${counterField} for user ${doc.user}`.green);
         }
 
+        const statusWasModified = this._statusWasModifiedBeforeSave || this.isModified('status');
+        const typeWasModified = this._typeWasModifiedBeforeSave || this.isModified('type');
+
         // 🔥 JOBCOST SYNCHRONIZATION: Auto-create/sync JobCost for approved quotations
         if (doc.status === 'approved' && doc.type === 'quotation') {
             await syncJobCostDocument(doc);
         }
 
+        // 🔥 QUOTATION STATUS UPDATE: Keep existing JobCost status in sync after approval
+        if (doc.type === 'quotation' && doc.status !== 'approved' && !this.isNew && statusWasModified) {
+            await syncQuotationStatusToJobCost(doc);
+        }
+
         // 🔥 INVOICE CONVERSION: Update JobCost when quotation becomes invoice
-        if (doc.type === 'invoice' && this.isModified('type')) {
+        if (doc.type === 'invoice' && typeWasModified) {
             await updateJobCostForInvoiceConversion(doc);
         }
 
@@ -490,7 +562,7 @@ QuotationDocumentSchema.post('save', async function(doc) {
         }
 
         // 🔥 INVOICE STATUS UPDATE: Sync customerInvoiceStatus when invoice status changes
-        if (doc.type === 'invoice' && !this.isNew && this.isModified('status')) {
+        if (doc.type === 'invoice' && !this.isNew && statusWasModified) {
             await syncInvoiceStatusToJobCost(doc);
         }
 
@@ -615,6 +687,31 @@ async function syncJobCostDocument(doc) {
 }
 
 /**
+ * Sync customerInvoiceStatus when a quotation status changes after JobCost creation.
+ */
+async function syncQuotationStatusToJobCost(doc) {
+    try {
+        const JobCost = require('./JobCost');
+        const session = typeof doc.$session === 'function' ? doc.$session() : null;
+
+        const result = await JobCost.updateMany(
+            { quotationId: `QUO-${doc.documentNumber}`, user: doc.user },
+            {
+                $set: {
+                    customerInvoiceStatus: doc.status,
+                    completed: doc.status === 'paid'
+                }
+            },
+            session ? { session } : undefined
+        );
+
+        console.log(`✅ Synced quotation status '${doc.status}' to ${result.modifiedCount || 0} JobCost record(s) for QUO-${doc.documentNumber}`.green);
+    } catch (error) {
+        console.error('❌ Quotation status sync error:', error);
+    }
+}
+
+/**
  * Update JobCost when quotation is converted to invoice
  */
 async function updateJobCostForInvoiceConversion(doc) {
@@ -622,17 +719,25 @@ async function updateJobCostForInvoiceConversion(doc) {
         const JobCost = require('./JobCost');
         
         const originalQuotationId = `QUO-${doc.documentNumber}`;
-        const jobCost = await JobCost.findOne({
+        const session = typeof doc.$session === 'function' ? doc.$session() : null;
+        const query = JobCost.findOne({
             quotationId: originalQuotationId,
             user: doc.user
         });
+        if (session) query.session(session);
+
+        const jobCost = await query;
 
         if (jobCost) {
             jobCost.invoiceId = `INV-${doc.documentNumber}`;
             jobCost.type = 'invoice';
             jobCost.customerInvoiceStatus = doc.status;
             jobCost.invoiceDate = doc.invoiceDate; // ✅ Update to invoice date
-            await jobCost.save();
+            if (session) {
+                await jobCost.save({ session });
+            } else {
+                await jobCost.save();
+            }
             
             console.log(`✅ Updated JobCost ${jobCost._id} with invoiceId: INV-${doc.documentNumber}, status: ${doc.status}, date: ${doc.invoiceDate}`.green);
         }
@@ -692,10 +797,18 @@ async function syncDirectInvoiceJobCost(doc) {
 async function syncInvoiceStatusToJobCost(doc) {
     try {
         const JobCost = require('./JobCost');
+        const session = typeof doc.$session === 'function' ? doc.$session() : null;
         
         await JobCost.updateMany(
-            { invoiceId: `INV-${doc.documentNumber}`, user: doc.user },
-            { $set: { customerInvoiceStatus: doc.status, completed: doc.status === 'paid' } }
+            {
+                $or: [
+                    { invoiceId: `INV-${doc.documentNumber}` },
+                    { quotationId: `QUO-${doc.documentNumber}` }
+                ],
+                user: doc.user
+            },
+            { $set: { customerInvoiceStatus: doc.status, completed: doc.status === 'paid' } },
+            session ? { session } : undefined
         );
         console.log(`✅ Synced status '${doc.status}' to JobCost for INV-${doc.documentNumber}`.green);
     } catch (error) {
@@ -731,6 +844,17 @@ QuotationDocumentSchema.statics.convertToInvoice = async function(quotationId, u
             if (quotation.type === 'invoice') throw new Error('Already an invoice');
             if (quotation.status === 'rejected') throw new Error('Rejected quotations cannot be converted to invoices');
             if (quotation.status !== 'approved') throw new Error('Must be approved before conversion');
+
+            // Ensure approved quotation always has a JobCost before conversion
+            const JobCost = require('./JobCost');
+            const existingJobCost = await JobCost.findOne({
+                quotationId: `QUO-${quotation.documentNumber}`,
+                user: userId
+            });
+            if (!existingJobCost) {
+                console.log(`🔧 Missing JobCost detected for approved quotation QUO-${quotation.documentNumber}. Creating before conversion.`.yellow);
+                await syncJobCostDocument(quotation);
+            }
 
             // 📅 DATE UPDATES FOR CONVERSION
             const currentDate = new Date();

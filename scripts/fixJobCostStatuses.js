@@ -8,13 +8,12 @@ async function fixJobCostStatuses() {
     const JobCost = require('../models/JobCost');
     const QuotationDocument = require('../models/QuotationDocument');
     
-    // Get all job costs with pending status that have a quotationId
+    // Get all job costs linked to a quotation and sync them with the current document status
     const jobCosts = await JobCost.find({ 
-        customerInvoiceStatus: 'pending',
-        quotationId: { $exists: true, $ne: null }
+        quotationId: { $exists: true, $ne: null, $ne: '' }
     });
     
-    console.log(`Found ${jobCosts.length} job costs with pending status`);
+    console.log(`Found ${jobCosts.length} quotation-linked job costs`);
     
     let updated = 0;
     for (const jc of jobCosts) {
@@ -25,15 +24,27 @@ async function fixJobCostStatuses() {
             user: jc.user
         });
         
-        if (quotation && quotation.status !== 'pending') {
+        if (quotation) {
+            const update = {
+                customerInvoiceStatus: quotation.status,
+                completed: quotation.status === 'paid'
+            };
+
+            if (quotation.type === 'invoice') {
+                update.type = 'invoice';
+                update.invoiceId = `INV-${quotation.documentNumber}`;
+                update.invoiceDate = quotation.invoiceDate;
+            } else {
+                update.type = 'quotation';
+                update.invoiceId = null;
+            }
+
             await JobCost.updateOne(
                 { _id: jc._id },
-                { $set: { customerInvoiceStatus: quotation.status } }
+                { $set: update }
             );
-            console.log(`Updated ${jc.quotationId}: pending -> ${quotation.status}`);
+            console.log(`Synced ${jc.quotationId}: ${jc.customerInvoiceStatus} -> ${quotation.status}`);
             updated++;
-        } else if (quotation) {
-            console.log(`Skipped ${jc.quotationId}: quotation status is ${quotation.status}`);
         } else {
             console.log(`No quotation found for ${jc.quotationId}`);
         }
